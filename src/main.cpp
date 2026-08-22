@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <Config.h>
+#include <Loader/ObjExporter.h>
 #include <Loader/SceneImport.h>
 #include <Render/Benchmark.h>
 #include <Render/FrameStats.h>
@@ -146,12 +147,17 @@ int main(int argc, char** argv)
 
     OrbitCamera camera;
 
-    //인자가 .fbx 경로면 시작하자마자 불러온다 (탐색기에서 파일을 exe에 끌어다 놓는 경우 포함)
-    bool argIsFbxPath = false;
+    //인자가 모델 경로면 시작하자마자 불러온다 (탐색기에서 파일을 exe에 끌어다 놓는 경우 포함).
+    //ufbx는 .obj도 읽어주므로 확장자를 둘 다 받는다.
+    bool argIsModelPath = false;
+    std::string convertOnceTarget;   //비어있지 않으면 변환 모드
     if (argc > 1)
     {
         std::string a1 = argv[1];
-        if (a1.size() > 4 && _stricmp(a1.c_str() + a1.size() - 4, ".fbx") == 0)
+        const bool isModel = a1.size() > 4
+            && (_stricmp(a1.c_str() + a1.size() - 4, ".fbx") == 0
+                || _stricmp(a1.c_str() + a1.size() - 4, ".obj") == 0);
+        if (isModel)
         {
 #ifdef _WIN32
             //한글 경로를 살리려면 argv 대신 유니코드 커맨드라인에서 다시 가져와야 한다
@@ -160,13 +166,29 @@ int main(int argc, char** argv)
                 a1 = utf8;
 #endif
             g_droppedFiles.push_back(a1);
-            argIsFbxPath = true;
+            argIsModelPath = true;
+
+            //두 번째 인자가 .obj면 "변환 모드": 불러오고 바로 내보낸 뒤 종료한다.
+            //UI 버튼은 자동 검증이 안 되니 테스트 통로가 되고, 배치 변환에도 쓸 수 있다.
+            if (argc > 2)
+            {
+                const std::string a2raw = argv[2];
+                if (a2raw.size() > 4 && _stricmp(a2raw.c_str() + a2raw.size() - 4, ".obj") == 0)
+                {
+#ifdef _WIN32
+                    const std::string a2utf8 = ArgToUtf8(2);
+                    convertOnceTarget = a2utf8.empty() ? a2raw : a2utf8;
+#else
+                    convertOnceTarget = a2raw;
+#endif
+                }
+            }
         }
     }
 
     //측정 모드(숫자 인자)면 씬을 자동 구성하고 vsync를 끈다. 인자가 없으면 전부 no-op.
     Benchmark bench;
-    if (!argIsFbxPath)
+    if (!argIsModelPath)
         bench.ParseArgs(argc, argv);
     if (!bench.Init(window, scene, camera))
     {
@@ -236,6 +258,24 @@ int main(int argc, char** argv)
                 std::cout << (report.ok ? "[가져오기] " : "[가져오기 실패] ") << report.message << std::endl;
             }
             g_droppedFiles.clear();
+
+            //--- 변환 모드: 불러오기가 끝났으면 바로 내보내고 종료 ---
+            if (!convertOnceTarget.empty())
+            {
+                const ExportResult saved = ExportSceneToObj(scene, convertOnceTarget);
+                std::cout << (saved.ok ? "[내보내기] " : "[내보내기 실패] ") << saved.message << std::endl;
+                convertOnceTarget.clear();
+                glfwSetWindowShouldClose(window, true);
+            }
+
+            //--- 내보내기 요청 ---
+            std::string savePath;
+            if (ui.ConsumeSaveRequest(savePath))
+            {
+                const ExportResult saved = ExportSceneToObj(scene, savePath);
+                ui.SetImportMessage(saved.message, !saved.ok);
+                std::cout << (saved.ok ? "[내보내기] " : "[내보내기 실패] ") << saved.message << std::endl;
+            }
         }
 
         //--- 렌더링 ---

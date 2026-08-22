@@ -25,11 +25,13 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept
         vbo = other.vbo;
         ebo = other.ebo;
         indexCount = other.indexCount;
+        vertexCount = other.vertexCount;
         name = std::move(other.name);
 
         //원본은 빈 껍데기로 만들어야 소멸자에서 남의 버퍼를 지우지 않는다
         other.vao = other.vbo = other.ebo = 0;
         other.indexCount = 0;
+        other.vertexCount = 0;
     }
     return *this;
 }
@@ -40,12 +42,14 @@ void Mesh::Release()
     if (vbo != 0) { glDeleteBuffers(1, &vbo); vbo = 0; }
     if (ebo != 0) { glDeleteBuffers(1, &ebo); ebo = 0; }
     indexCount = 0;
+    vertexCount = 0;
 }
 
 void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
 {
     Release();
     indexCount = (unsigned int)indices.size();
+    vertexCount = (unsigned int)vertices.size();
 
     //DSA(Direct State Access) 사용 — 4.5부터 가능.
     //예전 방식은 "바인딩해서 현재 대상을 바꾼 뒤 조작"이라 전역 상태에 의존하고 버그가 잘 났다.
@@ -70,6 +74,19 @@ void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigne
     glEnableVertexArrayAttrib(vao, 1);
     glVertexArrayAttribFormat(vao, 1, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
     glVertexArrayAttribBinding(vao, 1, 0);
+}
+
+bool Mesh::ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>& outIndices) const
+{
+    if (vbo == 0 || ebo == 0 || vertexCount == 0 || indexCount == 0)
+        return false;
+
+    outVertices.resize(vertexCount);
+    outIndices.resize(indexCount);
+
+    glGetNamedBufferSubData(vbo, 0, (GLsizeiptr)(vertexCount * sizeof(Vertex)), outVertices.data());
+    glGetNamedBufferSubData(ebo, 0, (GLsizeiptr)(indexCount * sizeof(unsigned int)), outIndices.data());
+    return true;
 }
 
 namespace Primitives

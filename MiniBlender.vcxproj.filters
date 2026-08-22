@@ -51,6 +51,9 @@
     <ClCompile Include="src\cpp\Loader\FbxLoader.cpp">
       <Filter>소스 파일\Loader</Filter>
     </ClCompile>
+    <ClCompile Include="src\cpp\Loader\ObjExporter.cpp">
+      <Filter>소스 파일\Loader</Filter>
+    </ClCompile>
     <ClCompile Include="src\cpp\Loader\SceneImport.cpp">
       <Filter>소스 파일\Loader</Filter>
     </ClCompile>
@@ -111,6 +114,9 @@
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Loader\FbxLoader.h">
+      <Filter>헤더 파일\Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Loader\ObjExporter.h">
       <Filter>헤더 파일\Loader</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Loader\SceneImport.h">

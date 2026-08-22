@@ -144,6 +144,7 @@
     <ClCompile Include="src\glad.c" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\cpp\Loader\FbxLoader.cpp" />
+    <ClCompile Include="src\cpp\Loader\ObjExporter.cpp" />
     <ClCompile Include="src\cpp\Loader\SceneImport.cpp" />
     <ClCompile Include="src\cpp\Render\Benchmark.cpp" />
     <ClCompile Include="src\cpp\Render\FrameStats.cpp" />
@@ -166,6 +167,7 @@
     <ClInclude Include="include\header\shader.h" />
     <ClInclude Include="src\header\Config.h" />
     <ClInclude Include="src\header\Loader\FbxLoader.h" />
+    <ClInclude Include="src\header\Loader\ObjExporter.h" />
     <ClInclude Include="src\header\Loader\SceneImport.h" />
     <ClInclude Include="src\header\Render\Benchmark.h" />
     <ClInclude Include="src\header\Render\FrameStats.h" />

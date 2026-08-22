@@ -32,6 +32,7 @@ public:
     //UI는 파일을 직접 읽지 않는다. "이 경로를 불러와 달라"는 요청만 남기고
     //실제 로딩은 main이 처리한다 (UI가 로더/GL에 의존하지 않게 하려는 것).
     bool ConsumeLoadRequest(std::string& outPath);
+    bool ConsumeSaveRequest(std::string& outPath);
     //불러오기 결과를 패널에 표시하기 위해 돌려받는다
     void SetImportMessage(const std::string& msg, bool isError);
     void SetSelectedId(unsigned int id) { selectedId = id; }
@@ -40,7 +41,7 @@ private:
     void DrawStatsPanel(const FrameStats& stats, Renderer& renderer);
     void DrawOutliner(Scene& scene);
     void DrawInspector(Scene& scene, OrbitCamera& camera);
-    void DrawImportPanel();
+    void DrawFilePanel();
 
     unsigned int selectedId = 0;
 
@@ -48,6 +49,11 @@ private:
     char pathBuffer[512] = "";
     bool hasLoadRequest = false;
     std::string requestedPath;
+
+    //내보내기 상태. 기본 경로를 채워두면 처음 쓰는 사람이 형식을 안 헷갈린다
+    char exportPathBuffer[512] = "export.obj";
+    bool hasSaveRequest = false;
+    std::string requestedSavePath;
     std::string importMessage;
     bool importFailed = false;
 

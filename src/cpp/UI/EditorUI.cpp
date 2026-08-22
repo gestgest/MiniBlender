@@ -73,7 +73,7 @@ bool EditorUI::WantCaptureKeyboard() const
 void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats)
 {
     DrawStatsPanel(stats, renderer);
-    DrawImportPanel();
+    DrawFilePanel();
     DrawOutliner(scene);
     DrawInspector(scene, camera);
 }
@@ -88,19 +88,30 @@ bool EditorUI::ConsumeLoadRequest(std::string& outPath)
     return true;
 }
 
+bool EditorUI::ConsumeSaveRequest(std::string& outPath)
+{
+    if (!hasSaveRequest)
+        return false;
+
+    outPath = requestedSavePath;
+    hasSaveRequest = false;
+    return true;
+}
+
 void EditorUI::SetImportMessage(const std::string& msg, bool isError)
 {
     importMessage = msg;
     importFailed = isError;
 }
 
-void EditorUI::DrawImportPanel()
+void EditorUI::DrawFilePanel()
 {
     ImGui::SetNextWindowPos(ImVec2(330, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(430, 130), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(430, 190), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin("FBX 가져오기"))
+    if (ImGui::Begin("파일"))
     {
+        ImGui::SeparatorText("가져오기 (FBX)");
         ImGui::TextDisabled("창에 파일을 끌어다 놓아도 됩니다");
 
         ImGui::SetNextItemWidth(-90.0f);
@@ -115,6 +126,20 @@ void EditorUI::DrawImportPanel()
         {
             requestedPath = pathBuffer;
             hasLoadRequest = true;
+        }
+
+        ImGui::SeparatorText("내보내기 (OBJ)");
+        ImGui::SetNextItemWidth(-90.0f);
+        const bool exportEntered = ImGui::InputText("##exportpath", exportPathBuffer, sizeof(exportPathBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::SameLine();
+        const bool exportClicked = ImGui::Button("저장");
+
+        if ((exportEntered || exportClicked) && exportPathBuffer[0] != 0)
+        {
+            requestedSavePath = exportPathBuffer;
+            hasSaveRequest = true;
         }
 
         if (!importMessage.empty())

@@ -31,8 +31,15 @@ public:
     void Upload(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
     void Release();
 
+    //GPU에 올라간 정점/인덱스를 다시 CPU로 읽어온다 (파일 내보내기용).
+    //CPU 사본을 따로 들고 있지 않는 이유: 메시 하나를 오브젝트 수백 개가 공유하는 구조라
+    //데이터를 이중으로 갖고 있을 이유가 없다. 내보내기는 어쩌다 한 번 하는 일이라 되읽기가 싸게 먹힌다.
+    //(glNamedBufferStorage를 flags=0으로 만들었어도 읽기는 된다. 매핑이 아니라 복사라서)
+    bool ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>& outIndices) const;
+
     unsigned int GetVAO() const { return vao; }
     unsigned int GetIndexCount() const { return indexCount; }
+    unsigned int GetVertexCount() const { return vertexCount; }
     unsigned int GetTriangleCount() const { return indexCount / 3; }
     const std::string& GetName() const { return name; }
     void SetName(const std::string& n) { name = n; }
@@ -42,6 +49,7 @@ private:
     unsigned int vbo = 0;
     unsigned int ebo = 0;
     unsigned int indexCount = 0;
+    unsigned int vertexCount = 0;
     std::string name = "Mesh";
 };
 
