@@ -9,7 +9,7 @@ C++/OpenGL 4.6으로 만드는 미니 3D 에디터. 블렌더 같은 DCC 툴의 
 ## 빌드
 
 Visual Studio 2022로 `MiniBlender.sln`을 열고 **x64 / Debug** 로 빌드하면 끝이다.
-의존성(GLAD, GLFW, GLM, Dear ImGui)은 전부 저장소에 포함돼 있어서 별도 설치가 필요 없다.
+의존성(GLAD, GLFW, GLM, Dear ImGui, ufbx)은 전부 저장소에 포함돼 있어서 별도 설치가 필요 없다.
 
 | 의존성 | 버전 | 위치 |
 |---|---|---|
@@ -17,6 +17,7 @@ Visual Studio 2022로 `MiniBlender.sln`을 열고 **x64 / Debug** 로 빌드하�
 | GLFW | 3.x | `include/GLFW`, `lib/` |
 | GLM | — | `include/glm` |
 | Dear ImGui | v1.92.3 (docking) | `third_party/imgui` |
+| ufbx | v0.23 (FBX 로더) | `third_party/ufbx` |
 
 > 실행 시 작업 디렉터리는 **프로젝트 디렉터리**여야 한다 (`src/vs/*.vs` 같은 셰이더를 상대 경로로 읽는다).
 > VS에서 F5로 실행하면 기본값이 그렇게 잡혀 있다.
@@ -29,6 +30,35 @@ Visual Studio 2022로 `MiniBlender.sln`을 열고 **x64 / Debug** 로 빌드하�
 | Shift + 중간 버튼 | 평행 이동 (pan) |
 | 휠 | 줌 (거리에 비례) |
 | ESC | 종료 |
+
+## FBX 가져오기
+
+세 가지 방법이 있고 전부 같은 경로로 처리된다.
+
+| 방법 | 비고 |
+|---|---|
+| 창에 파일을 **끌어다 놓기** | 여러 개를 한 번에 놓아도 된다 |
+| **FBX 가져오기** 패널에 경로 입력 후 Enter | |
+| `MiniBlender.exe 모델.fbx` | 탐색기에서 exe에 파일을 떨어뜨리는 경우 포함 |
+
+불러오면 모델 전체가 화면에 들어오도록 카메라가 자동으로 맞춰지고,
+시작 시 놓여 있던 예시용 큐브는 치워진다.
+
+로더는 [ufbx](https://github.com/ufbx/ufbx)를 쓴다. FBX는 Autodesk 폐쇄 포맷이라 선택지가 셋뿐인데
+—공식 FBX SDK(계정 등록 + 배포 제약), Assimp(별도 빌드 필요), ufbx(`.c`/`.h` 두 개)—
+"클론 → VS로 열기 → F5"라는 이 프로젝트의 전제를 안 깨는 건 ufbx뿐이었다.
+
+처리 과정에서 신경 쓴 것:
+
+- **좌표계·단위 통일**: FBX는 만든 툴마다 축과 단위가 다르다(3ds Max는 Z-up, 유니티 에셋은 cm).
+  `target_axes`와 `target_unit_meters`로 로드 시점에 변환해서, 우리 코드는 항상 "Y-up, 1유닛 = 1m"만 가정한다.
+- **폴리곤 삼각형화**: FBX는 사각형 면을 흔히 쓰지만 OpenGL은 삼각형만 그린다.
+- **노멀 생성**: 노멀이 없는 파일이 흔하다. 없으면 만들어 넣는다(안 그러면 조명이 새까맣게 나온다).
+- **한글 경로**: `argv`는 콘솔 ANSI 코드페이지(CP949)로 들어오는데 ufbx는 UTF-8 경로를 기대한다.
+  그래서 커맨드라인 인자는 `CommandLineToArgvW`로 원본 유니코드에서 다시 읽어 UTF-8로 변환한다.
+  (드래그앤드롭은 GLFW가 UTF-8로 주므로 그대로 쓴다)
+
+아직 재질과 텍스처는 읽지 않는다 — 전부 단색으로 그려진다.
 
 ## 측정 모드
 
@@ -68,13 +98,17 @@ src/
 ├── main.cpp                 창/GL 초기화, 렌더 루프, 입력
 ├── header/, cpp/
 │   ├── Render/FrameStats    드로우콜·삼각형·CPU/GPU 시간 계측
+│   ├── Render/Benchmark     측정 모드 (인자 파싱 → 씬 구성 → 평균 출력)
 │   ├── Render/Mesh          VAO/VBO/EBO + 프리미티브 생성기
 │   ├── Render/OrbitCamera   DCC식 궤도 카메라
 │   ├── Render/Renderer      씬 렌더링 (드로우콜 제출 지점)
 │   ├── Scene/Scene          메시 라이브러리 + 오브젝트 목록
-│   └── UI/EditorUI          ImGui 패널 (통계 / 아웃라이너 / 속성)
+│   ├── Loader/FbxLoader     FBX → 정점 데이터 (GL을 모른다)
+│   ├── Loader/SceneImport   로더와 씬을 잇는 접착층 + 카메라 자동 맞춤
+│   └── UI/EditorUI          ImGui 패널 (통계 / 가져오기 / 아웃라이너 / 속성)
 ├── vs/, fs/                 셰이더
 third_party/imgui/           Dear ImGui (vendored)
+third_party/ufbx/            ufbx (vendored)
 ```
 
 ## 구현 메모
@@ -88,6 +122,9 @@ third_party/imgui/           Dear ImGui (vendored)
 - **DSA 사용**: `glCreateBuffers` / `glNamedBufferStorage` 등. 바인딩 상태에 의존하지 않아
   순서 실수로 인한 버그가 원천 차단된다.
 - **디버그 출력**: Debug 빌드에서 `glDebugMessageCallback`을 붙여 GL 에러를 콘솔에 즉시 출력한다.
+- **vsync와 CPU 값**: 평소 모드는 vsync가 켜져 있어서, 드라이버가 프레임 큐를 기다리는 시간이
+  측정 구간 안에서 발생한다. 그래서 화면의 CPU 값이 프레임 주기(75Hz면 13.3ms)에 붙어 움직이지 않는다.
+  순수 CPU 부하를 보려면 vsync를 끈 측정 모드를 쓸 것.
 
 ## 로드맵
 
@@ -99,4 +136,5 @@ third_party/imgui/           Dear ImGui (vendored)
 
 ## 라이선스
 
-Dear ImGui는 MIT 라이선스이며 `third_party/imgui/LICENSE.txt`에 원문이 있다.
+- Dear ImGui — MIT (`third_party/imgui/LICENSE.txt`)
+- ufbx — MIT 또는 Public Domain 택일 (`third_party/ufbx/LICENSE`)
