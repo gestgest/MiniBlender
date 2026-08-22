@@ -73,8 +73,60 @@ bool EditorUI::WantCaptureKeyboard() const
 void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats)
 {
     DrawStatsPanel(stats, renderer);
+    DrawImportPanel();
     DrawOutliner(scene);
     DrawInspector(scene, camera);
+}
+
+bool EditorUI::ConsumeLoadRequest(std::string& outPath)
+{
+    if (!hasLoadRequest)
+        return false;
+
+    outPath = requestedPath;
+    hasLoadRequest = false;
+    return true;
+}
+
+void EditorUI::SetImportMessage(const std::string& msg, bool isError)
+{
+    importMessage = msg;
+    importFailed = isError;
+}
+
+void EditorUI::DrawImportPanel()
+{
+    ImGui::SetNextWindowPos(ImVec2(330, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(430, 130), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("FBX 가져오기"))
+    {
+        ImGui::TextDisabled("창에 파일을 끌어다 놓아도 됩니다");
+
+        ImGui::SetNextItemWidth(-90.0f);
+        //Enter로도 불러올 수 있게 (경로를 붙여넣고 바로 실행하는 흐름이 자연스럽다)
+        const bool entered = ImGui::InputText("##path", pathBuffer, sizeof(pathBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::SameLine();
+        const bool clicked = ImGui::Button("불러오기");
+
+        if ((entered || clicked) && pathBuffer[0] != '\0')
+        {
+            requestedPath = pathBuffer;
+            hasLoadRequest = true;
+        }
+
+        if (!importMessage.empty())
+        {
+            ImGui::Separator();
+            if (importFailed)
+                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", importMessage.c_str());
+            else
+                ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "%s", importMessage.c_str());
+        }
+    }
+    ImGui::End();
 }
 
 void EditorUI::DrawStatsPanel(const FrameStats& stats, Renderer& renderer)
@@ -97,6 +149,14 @@ void EditorUI::DrawStatsPanel(const FrameStats& stats, Renderer& renderer)
         //CPU가 높으면 드로우콜/상태변경이 병목 -> 배칭·인스턴싱이 답
         //GPU가 높으면 픽셀/버텍스 부하가 병목 -> 컬링·LOD·셰이더 최적화가 답
         ImGui::Text("CPU      %.2f ms", stats.GetCpuMs());
+
+        //vsync가 켜져 있으면 드라이버가 프레임 큐가 찰 때까지 GL 호출 안에서 CPU를 붙잡는다.
+        //그 대기가 우리 측정 구간 안에서 일어나기 때문에 CPU 값이 프레임 주기에 붙어버린다
+        //(75Hz면 13.3ms 근처에서 안 움직임). 진짜 CPU 부하를 보려면 vsync를 끈 측정 모드를 써야 한다.
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("vsync가 켜져 있으면 대기 시간이 섞여 프레임 주기에 붙는다.\n"
+                              "순수 CPU 부하는 측정 모드(MiniBlender.exe <개수>)에서 볼 것.");
+
         ImGui::Text("GPU      %.2f ms", stats.GetGpuMs());
         ImGui::Separator();
 

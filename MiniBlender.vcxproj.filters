@@ -5,6 +5,12 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
+    <Filter Include="소스 파일\Loader">
+      <UniqueIdentifier>{b1000001-0000-4000-9000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="헤더 파일\Loader">
+      <UniqueIdentifier>{b1000002-0000-4000-9000-000000000004}</UniqueIdentifier>
+    </Filter>
     <Filter Include="소스 파일\Render">
       <UniqueIdentifier>{b1000001-0000-4000-9000-000000000001}</UniqueIdentifier>
     </Filter>
@@ -42,6 +48,12 @@
     <ClCompile Include="src\glad.c">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="src\cpp\Loader\FbxLoader.cpp">
+      <Filter>소스 파일\Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cpp\Loader\SceneImport.cpp">
+      <Filter>소스 파일\Loader</Filter>
+    </ClCompile>
     <ClCompile Include="src\cpp\Render\Benchmark.cpp">
       <Filter>소스 파일\Render</Filter>
     </ClCompile>
@@ -62,6 +74,9 @@
     </ClCompile>
     <ClCompile Include="src\cpp\UI\EditorUI.cpp">
       <Filter>소스 파일\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\ufbx\ufbx.c">
+      <Filter>third_party</Filter>
     </ClCompile>
     <ClCompile Include="third_party\imgui\imgui.cpp">
       <Filter>third_party</Filter>
@@ -94,6 +109,12 @@
     </ClInclude>
     <ClInclude Include="include\header\camera.h">
       <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Loader\FbxLoader.h">
+      <Filter>헤더 파일\Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Loader\SceneImport.h">
+      <Filter>헤더 파일\Loader</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Render\Benchmark.h">
       <Filter>헤더 파일\Render</Filter>

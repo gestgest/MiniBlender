@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <Config.h>
+#include <Loader/SceneImport.h>
 #include <Render/Benchmark.h>
 #include <Render/FrameStats.h>
 #include <Render/OrbitCamera.h>
@@ -19,14 +20,47 @@
 
 #include <cstdio>
 #include <iostream>
+#include <string>
+#include <vector>
 
 void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+void DropCallback(GLFWwindow* window, int count, const char** paths);
 void APIENTRY GLDebugCallback(GLenum source, GLenum type, unsigned int id, GLenum severity,
     GLsizei length, const char* message, const void* userParam);
 
 //스크롤은 콜백으로만 들어오는 이벤트라(폴링이 불가능) 여기 모았다가 프레임에서 소비한다
 static float g_scrollDelta = 0.0f;
+
+#ifdef _WIN32
+//argv는 콘솔 ANSI 코드페이지(한국어 윈도우면 CP949)로 들어온다.
+//그런데 ufbx를 비롯한 라이브러리들은 경로를 UTF-8로 기대해서, 한글이 든 경로가 그대로는 안 열린다.
+//("File not found (C:\...\?ѱ?????.fbx)" 처럼 물음표로 깨져 나온다)
+//윈도우가 원본 그대로 보관하는 유니코드 커맨드라인을 받아서 UTF-8로 다시 만든다.
+static std::string ArgToUtf8(int index)
+{
+    int wargc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    if (wargv == nullptr || index >= wargc)
+        return std::string();
+
+    const int need = WideCharToMultiByte(CP_UTF8, 0, wargv[index], -1, nullptr, 0, nullptr, nullptr);
+    std::string out;
+    if (need > 1)
+    {
+        out.resize((size_t)need - 1);   //-1: 널 종료 문자는 std::string이 알아서 관리한다
+        WideCharToMultiByte(CP_UTF8, 0, wargv[index], -1, out.data(), need, nullptr, nullptr);
+    }
+
+    LocalFree(wargv);
+    return out;
+}
+#endif
+
+//창에 끌어다 놓은 파일 경로. 콜백에서 바로 로딩하지 않고 모아뒀다가 루프에서 처리한다.
+//콜백은 glfwPollEvents 안에서 불리는데, 거기서 GPU 업로드 같은 무거운 일을 하면
+//입력 처리 흐름 한가운데서 프레임이 길게 멈춘다.
+static std::vector<std::string> g_droppedFiles;
 
 int main(int argc, char** argv)
 {
@@ -67,6 +101,7 @@ int main(int argc, char** argv)
     //순서가 뒤바뀌면 우리 콜백이 통째로 씹힌다.
     glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
     glfwSetScrollCallback(window, ScrollCallback);
+    glfwSetDropCallback(window, DropCallback);
 
     //--- GLAD 로드 ---
     //컨텍스트를 current로 만든 "다음"에 호출해야 함. 순서 바뀌면 함수 포인터가 전부 null.
@@ -99,7 +134,9 @@ int main(int argc, char** argv)
     //--- 시스템 초기화 ---
     Scene scene;
     scene.InitDefaultMeshes();
-    scene.AddObject("Cube", "Cube", glm::vec3(0.0f, 0.5f, 0.0f));
+    //시작 화면이 텅 비어 보이지 않게 큐브를 하나 놓되, 파일을 불러오면 치워질 것으로 표시해 둔다
+    if (SceneObject* startupCube = scene.AddObject("Cube", "Cube", glm::vec3(0.0f, 0.5f, 0.0f)))
+        startupCube->isPlaceholder = true;
 
     Renderer renderer;
     renderer.Init();
@@ -109,9 +146,28 @@ int main(int argc, char** argv)
 
     OrbitCamera camera;
 
-    //측정 모드(인자 있음)면 씬을 자동 구성하고 vsync를 끈다. 인자가 없으면 전부 no-op.
+    //인자가 .fbx 경로면 시작하자마자 불러온다 (탐색기에서 파일을 exe에 끌어다 놓는 경우 포함)
+    bool argIsFbxPath = false;
+    if (argc > 1)
+    {
+        std::string a1 = argv[1];
+        if (a1.size() > 4 && _stricmp(a1.c_str() + a1.size() - 4, ".fbx") == 0)
+        {
+#ifdef _WIN32
+            //한글 경로를 살리려면 argv 대신 유니코드 커맨드라인에서 다시 가져와야 한다
+            const std::string utf8 = ArgToUtf8(1);
+            if (!utf8.empty())
+                a1 = utf8;
+#endif
+            g_droppedFiles.push_back(a1);
+            argIsFbxPath = true;
+        }
+    }
+
+    //측정 모드(숫자 인자)면 씬을 자동 구성하고 vsync를 끈다. 인자가 없으면 전부 no-op.
     Benchmark bench;
-    bench.ParseArgs(argc, argv);
+    if (!argIsFbxPath)
+        bench.ParseArgs(argc, argv);
     if (!bench.Init(window, scene, camera))
     {
         renderer.Shutdown();
@@ -165,6 +221,22 @@ int main(int argc, char** argv)
 
         if (!ui.WantCaptureKeyboard() && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
+
+        //--- 파일 불러오기 요청 처리 ---
+        //UI 버튼과 드래그앤드롭 두 경로가 여기서 만난다
+        {
+            std::string requested;
+            if (ui.ConsumeLoadRequest(requested))
+                g_droppedFiles.push_back(requested);
+
+            for (const std::string& file : g_droppedFiles)
+            {
+                const ImportReport report = ImportFbxIntoScene(scene, camera, file);
+                ui.SetImportMessage(report.message, !report.ok);
+                std::cout << (report.ok ? "[가져오기] " : "[가져오기 실패] ") << report.message << std::endl;
+            }
+            g_droppedFiles.clear();
+        }
 
         //--- 렌더링 ---
         int fbWidth, fbHeight;
@@ -221,6 +293,12 @@ void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     g_scrollDelta += (float)yoffset;
+}
+
+void DropCallback(GLFWwindow* window, int count, const char** paths)
+{
+    for (int i = 0; i < count; ++i)
+        g_droppedFiles.push_back(paths[i]);
 }
 
 void APIENTRY GLDebugCallback(GLenum source, GLenum type, unsigned int id, GLenum severity,

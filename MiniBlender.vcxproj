@@ -143,6 +143,8 @@
   <ItemGroup>
     <ClCompile Include="src\glad.c" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\cpp\Loader\FbxLoader.cpp" />
+    <ClCompile Include="src\cpp\Loader\SceneImport.cpp" />
     <ClCompile Include="src\cpp\Render\Benchmark.cpp" />
     <ClCompile Include="src\cpp\Render\FrameStats.cpp" />
     <ClCompile Include="src\cpp\Render\Mesh.cpp" />
@@ -150,6 +152,7 @@
     <ClCompile Include="src\cpp\Render\Renderer.cpp" />
     <ClCompile Include="src\cpp\Scene\Scene.cpp" />
     <ClCompile Include="src\cpp\UI\EditorUI.cpp" />
+    <ClCompile Include="third_party\ufbx\ufbx.c" />
     <ClCompile Include="third_party\imgui\imgui.cpp" />
     <ClCompile Include="third_party\imgui\imgui_draw.cpp" />
     <ClCompile Include="third_party\imgui\imgui_tables.cpp" />
@@ -162,6 +165,8 @@
     <ClInclude Include="include\header\camera.h" />
     <ClInclude Include="include\header\shader.h" />
     <ClInclude Include="src\header\Config.h" />
+    <ClInclude Include="src\header\Loader\FbxLoader.h" />
+    <ClInclude Include="src\header\Loader\SceneImport.h" />
     <ClInclude Include="src\header\Render\Benchmark.h" />
     <ClInclude Include="src\header\Render\FrameStats.h" />
     <ClInclude Include="src\header\Render\Mesh.h" />

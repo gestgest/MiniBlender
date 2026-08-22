@@ -41,4 +41,8 @@ struct SceneObject
 
     //피킹용 ID. 0은 "빈 공간"으로 예약해서 1부터 매긴다
     unsigned int id = 0;
+
+    //시작할 때 놓아두는 예시용 오브젝트인지. 파일을 불러오면 이건 치운다
+    //(안 치우면 불러온 모델이 기본 큐브 안에 파묻혀서 "왜 안 보이지?"가 된다)
+    bool isPlaceholder = false;
 };

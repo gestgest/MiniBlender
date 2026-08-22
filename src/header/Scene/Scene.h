@@ -17,11 +17,18 @@ public:
 
     Mesh* GetMesh(const std::string& name);
 
+    //런타임에 만들어진 메시(FBX 임포트 등)를 라이브러리에 등록한다.
+    //같은 이름이 이미 있으면 뒤에 번호를 붙여 유일하게 만든다.
+    Mesh* AddMesh(const std::string& name, const std::vector<Vertex>& vertices,
+        const std::vector<unsigned int>& indices);
+
     //메시 이름으로 오브젝트 추가. 반환값은 추가된 오브젝트 포인터
     SceneObject* AddObject(const std::string& name, const std::string& meshName,
         const glm::vec3& position = glm::vec3(0.0f));
 
     void RemoveObject(unsigned int id);
+    //예시용 오브젝트를 모두 제거한다. 반환값은 지운 개수
+    int RemovePlaceholders();
     SceneObject* FindById(unsigned int id);
 
     std::vector<SceneObject>& GetObjects() { return objects; }
