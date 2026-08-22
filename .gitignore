@@ -1,0 +1,35 @@
+# --- 빌드 산출물 ---
+x64/
+Win32/
+[Bb]in/
+[Oo]bj/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.log
+*.tlog
+*.iobj
+*.ipdb
+*.exp
+
+# --- Visual Studio 개인 설정 / 캐시 ---
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+
+# --- 의존성은 "일부러" 추적한다 ---
+# include/(glad, glfw, glm, header), lib/(glfw3.lib), third_party/(imgui)는 커밋한다.
+# 클론 한 번으로 바로 빌드되게 하려는 것 — vcpkg/CMake 없이 VS만으로 열리는 게 이 프로젝트의 전제다.
+# 그래서 흔한 *.lib / *.dll 무시 규칙을 일부러 넣지 않았다.
+
+# --- 기타 ---
+Thumbs.db
+.DS_Store
+**/.claude/
+
+# ImGui가 실행 중 저장하는 창 배치 (개인 설정)
+imgui.ini

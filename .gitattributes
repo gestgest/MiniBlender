@@ -1,0 +1,12 @@
+* text=auto
+
+# 셰이더는 텍스트로 취급
+*.vs text
+*.fs text
+*.glsl text
+
+# 바이너리 (줄바꿈 변환 금지)
+*.lib binary
+*.dll binary
+*.ttf binary
+*.png binary
