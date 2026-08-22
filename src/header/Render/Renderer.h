@@ -20,6 +20,10 @@ public:
 
     void RenderScene(Scene& scene, const OrbitCamera& camera, int width, int height, FrameStats& stats);
 
+    //편집 모드일 때 정점을 점으로 덧그린다. 씬 패스 뒤에 별도 패스로 나가므로 드로우콜 1개가 추가된다.
+    void RenderEditPoints(const class EditMode& edit, const Scene& scene,
+        const OrbitCamera& camera, int width, int height, FrameStats& stats);
+
     //그리드 on/off (UI에서 토글)
     bool showGrid = true;
 
@@ -29,6 +33,7 @@ public:
 private:
     Shader* objectShader = nullptr;
     Shader* gridShader = nullptr;
+    Shader* pointShader = nullptr;
 
     //그리드는 버텍스 데이터가 없지만 VAO는 반드시 하나 바인딩돼 있어야 한다 (core 프로파일 규칙).
     //그래서 텅 빈 VAO를 하나 만들어 둔다.

@@ -3,6 +3,7 @@
 #include <Render/FrameStats.h>
 #include <Render/OrbitCamera.h>
 #include <Render/Renderer.h>
+#include <Edit/EditMode.h>
 #include <Scene/Scene.h>
 
 #include <imgui/imgui.h>
@@ -70,12 +71,13 @@ bool EditorUI::WantCaptureKeyboard() const
     return ImGui::GetIO().WantCaptureKeyboard;
 }
 
-void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats)
+void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats,
+    EditMode& edit)
 {
     DrawStatsPanel(stats, renderer);
     DrawFilePanel();
     DrawOutliner(scene);
-    DrawInspector(scene, camera);
+    DrawInspector(scene, camera, edit);
 }
 
 bool EditorUI::ConsumeLoadRequest(std::string& outPath)
@@ -128,7 +130,7 @@ void EditorUI::DrawFilePanel()
             hasLoadRequest = true;
         }
 
-        ImGui::SeparatorText("내보내기 (OBJ)");
+        ImGui::SeparatorText("내보내기 (확장자로 OBJ/FBX 결정)");
         ImGui::SetNextItemWidth(-90.0f);
         const bool exportEntered = ImGui::InputText("##exportpath", exportPathBuffer, sizeof(exportPathBuffer),
             ImGuiInputTextFlags_EnterReturnsTrue);
@@ -271,7 +273,7 @@ void EditorUI::DrawOutliner(Scene& scene)
     ImGui::End();
 }
 
-void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera)
+void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit)
 {
     ImGui::SetNextWindowPos(ImVec2(10, 630), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(300, 220), ImGuiCond_FirstUseEver);
@@ -299,6 +301,37 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera)
             ImGui::Separator();
             if (ImGui::Button("이 오브젝트로 시점 이동"))
                 camera.FocusOn(obj->transform.position);
+
+            //--- 정점 편집 ---
+            ImGui::SeparatorText("정점 편집");
+
+            if (!edit.IsActive() || edit.GetObjectId() != obj->id)
+            {
+                if (ImGui::Button("편집 모드 (Tab)"))
+                    edit.Enter(scene, obj->id);
+            }
+            else
+            {
+                if (ImGui::Button("편집 종료 (Tab)"))
+                    edit.Exit();
+
+                ImGui::Text("정점 %d개", edit.GetVertexCount());
+
+                if (edit.GetSelected() < 0)
+                {
+                    ImGui::TextDisabled("정점을 클릭해서 선택하세요");
+                    ImGui::TextDisabled("선택 후 드래그하면 이동합니다");
+                }
+                else
+                {
+                    ImGui::Text("선택: #%d", edit.GetSelected());
+
+                    //숫자로도 편집할 수 있게 (드래그는 화면 평면 위로만 움직이니 정밀 조정용)
+                    glm::vec3 pos = edit.GetSelectedPosition();
+                    if (ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f))
+                        edit.SetSelectedPosition(pos);
+                }
+            }
         }
     }
     ImGui::End();

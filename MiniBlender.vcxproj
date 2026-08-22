@@ -143,6 +143,8 @@
   <ItemGroup>
     <ClCompile Include="src\glad.c" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\cpp\Edit\EditMode.cpp" />
+    <ClCompile Include="src\cpp\Loader\FbxExporter.cpp" />
     <ClCompile Include="src\cpp\Loader\FbxLoader.cpp" />
     <ClCompile Include="src\cpp\Loader\ObjExporter.cpp" />
     <ClCompile Include="src\cpp\Loader\SceneImport.cpp" />
@@ -166,6 +168,8 @@
     <ClInclude Include="include\header\camera.h" />
     <ClInclude Include="include\header\shader.h" />
     <ClInclude Include="src\header\Config.h" />
+    <ClInclude Include="src\header\Edit\EditMode.h" />
+    <ClInclude Include="src\header\Loader\FbxExporter.h" />
     <ClInclude Include="src\header\Loader\FbxLoader.h" />
     <ClInclude Include="src\header\Loader\ObjExporter.h" />
     <ClInclude Include="src\header\Loader\SceneImport.h" />
@@ -182,6 +186,8 @@
     <None Include="src\vs\basic.vs" />
     <None Include="src\fs\basic.fs" />
     <None Include="src\vs\grid.vs" />
+    <None Include="src\vs\point.vs" />
+    <None Include="src\fs\point.fs" />
     <None Include="src\fs\grid.fs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

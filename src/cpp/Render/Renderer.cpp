@@ -2,6 +2,7 @@
 
 #include <Render/Mesh.h>
 #include <Render/OrbitCamera.h>
+#include <Edit/EditMode.h>
 #include <Scene/Scene.h>
 
 #include <glad/glad.h>
@@ -13,6 +14,7 @@ void Renderer::Init()
 {
     objectShader = new Shader("src/vs/basic.vs", "src/fs/basic.fs");
     gridShader = new Shader("src/vs/grid.vs", "src/fs/grid.fs");
+    pointShader = new Shader("src/vs/point.vs", "src/fs/point.fs");
 
     glCreateVertexArrays(1, &emptyVAO);
 }
@@ -21,6 +23,7 @@ void Renderer::Shutdown()
 {
     delete objectShader; objectShader = nullptr;
     delete gridShader;   gridShader = nullptr;
+    delete pointShader;  pointShader = nullptr;
 
     if (emptyVAO != 0)
     {
@@ -94,5 +97,52 @@ void Renderer::RenderScene(Scene& scene, const OrbitCamera& camera, int width, i
         glEnable(GL_CULL_FACE);
     }
 
+    glBindVertexArray(0);
+}
+
+void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
+    const OrbitCamera& camera, int width, int height, FrameStats& stats)
+{
+    if (!edit.IsActive() || edit.GetVertexCount() == 0)
+        return;
+
+    const SceneObject* obj = nullptr;
+    for (const SceneObject& o : scene.GetObjects())
+    {
+        if (o.id == edit.GetObjectId()) { obj = &o; break; }
+    }
+    if (obj == nullptr)
+        return;
+
+    const float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
+    const glm::mat4 mvp = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()
+        * obj->transform.GetMatrix();
+
+    //깊이 테스트를 끈다: 정점은 면에 딱 붙어 있어서 z-파이팅으로 깜빡이고,
+    //뒷면의 정점도 보여야 반대편을 편집할 수 있다(블렌더도 기본이 이렇다).
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_PROGRAM_POINT_SIZE);   //셰이더에서 gl_PointSize를 쓰려면 필요
+
+    pointShader->use();
+    pointShader->setMat4("mvp", mvp);
+
+    //1) 전체 정점
+    pointShader->setFloat("pointSize", 7.0f);
+    pointShader->setVec3("pointColor", glm::vec3(0.15f, 0.55f, 1.0f));
+    glBindVertexArray(edit.GetPointVAO());
+    glDrawArrays(GL_POINTS, 0, edit.GetVertexCount());
+    stats.AddDrawCall(0);
+
+    //2) 선택된 정점만 크고 밝게 덧그린다
+    if (edit.GetSelected() >= 0)
+    {
+        pointShader->setFloat("pointSize", 12.0f);
+        pointShader->setVec3("pointColor", glm::vec3(1.0f, 0.65f, 0.1f));
+        glDrawArrays(GL_POINTS, edit.GetSelected(), 1);
+        stats.AddDrawCall(0);
+    }
+
+    glDisable(GL_PROGRAM_POINT_SIZE);
+    glEnable(GL_DEPTH_TEST);
     glBindVertexArray(0);
 }

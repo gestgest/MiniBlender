@@ -10,6 +10,8 @@
 #include <glm/glm.hpp>
 
 #include <Config.h>
+#include <Edit/EditMode.h>
+#include <Loader/FbxExporter.h>
 #include <Loader/ObjExporter.h>
 #include <Loader/SceneImport.h>
 #include <Render/Benchmark.h>
@@ -57,6 +59,14 @@ static std::string ArgToUtf8(int index)
     return out;
 }
 #endif
+
+//저장 경로의 확장자를 보고 익스포터를 고른다. UI와 CLI 두 곳에서 같은 규칙을 쓰기 위해 함수로 뺐다.
+static ExportResult ExportScene(const Scene& scene, const std::string& path)
+{
+    if (path.size() > 4 && _stricmp(path.c_str() + path.size() - 4, ".fbx") == 0)
+        return ExportSceneToFbx(scene, path);
+    return ExportSceneToObj(scene, path);
+}
 
 //창에 끌어다 놓은 파일 경로. 콜백에서 바로 로딩하지 않고 모아뒀다가 루프에서 처리한다.
 //콜백은 glfwPollEvents 안에서 불리는데, 거기서 GPU 업로드 같은 무거운 일을 하면
@@ -173,7 +183,10 @@ int main(int argc, char** argv)
             if (argc > 2)
             {
                 const std::string a2raw = argv[2];
-                if (a2raw.size() > 4 && _stricmp(a2raw.c_str() + a2raw.size() - 4, ".obj") == 0)
+                const bool isExportTarget = a2raw.size() > 4
+                    && (_stricmp(a2raw.c_str() + a2raw.size() - 4, ".obj") == 0
+                        || _stricmp(a2raw.c_str() + a2raw.size() - 4, ".fbx") == 0);
+                if (isExportTarget)
                 {
 #ifdef _WIN32
                     const std::string a2utf8 = ArgToUtf8(2);
@@ -198,12 +211,18 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    EditMode edit;
+    edit.Init();
+
     EditorUI ui;
     ui.Init(window);
 
     //뷰포트 마우스 조작 상태
     double lastMouseX = 0.0, lastMouseY = 0.0;
     glfwGetCursorPos(window, &lastMouseX, &lastMouseY);
+
+    bool tabWasDown = false;
+    bool leftWasDown = false;
 
     double lastTitleUpdate = glfwGetTime();
 
@@ -244,6 +263,48 @@ int main(int argc, char** argv)
         if (!ui.WantCaptureKeyboard() && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
+        //--- 편집 모드 (Tab 토글, 블렌더와 같은 키) ---
+        {
+            int fbW = 0, fbH = 0;
+            glfwGetFramebufferSize(window, &fbW, &fbH);
+
+            const bool tabDown = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+            if (tabDown && !tabWasDown && !ui.WantCaptureKeyboard())
+            {
+                if (edit.IsActive())
+                    edit.Exit();
+                else if (ui.GetSelectedId() != 0)
+                    edit.Enter(scene, ui.GetSelectedId());
+            }
+            tabWasDown = tabDown;
+
+            //편집 대상이 사라졌으면(삭제 등) 편집 모드도 빠져나온다
+            if (edit.IsActive() && scene.FindById(edit.GetObjectId()) == nullptr)
+                edit.Exit();
+
+            if (edit.IsActive() && !ui.WantCaptureMouse())
+            {
+                const SceneObject* target = scene.FindById(edit.GetObjectId());
+                const glm::mat4 model = target ? target->transform.GetMatrix() : glm::mat4(1.0f);
+                const float aspect = (fbH > 0) ? (float)fbW / (float)fbH : 1.0f;
+                const glm::mat4 viewProj = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
+
+                const bool leftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+                //누르는 순간에만 선택. 누른 채 움직이면 드래그로 넘어간다.
+                if (leftDown && !leftWasDown)
+                    edit.PickAt((float)mx, (float)my, fbW, fbH, viewProj, model);
+                else if (leftDown && (dx != 0.0f || dy != 0.0f))
+                    edit.DragSelected(dx, dy, camera, fbH, model);
+
+                leftWasDown = leftDown;
+            }
+            else
+            {
+                leftWasDown = false;
+            }
+        }
+
         //--- 파일 불러오기 요청 처리 ---
         //UI 버튼과 드래그앤드롭 두 경로가 여기서 만난다
         {
@@ -262,7 +323,7 @@ int main(int argc, char** argv)
             //--- 변환 모드: 불러오기가 끝났으면 바로 내보내고 종료 ---
             if (!convertOnceTarget.empty())
             {
-                const ExportResult saved = ExportSceneToObj(scene, convertOnceTarget);
+                const ExportResult saved = ExportScene(scene, convertOnceTarget);
                 std::cout << (saved.ok ? "[내보내기] " : "[내보내기 실패] ") << saved.message << std::endl;
                 convertOnceTarget.clear();
                 glfwSetWindowShouldClose(window, true);
@@ -272,7 +333,7 @@ int main(int argc, char** argv)
             std::string savePath;
             if (ui.ConsumeSaveRequest(savePath))
             {
-                const ExportResult saved = ExportSceneToObj(scene, savePath);
+                const ExportResult saved = ExportScene(scene, savePath);
                 ui.SetImportMessage(saved.message, !saved.ok);
                 std::cout << (saved.ok ? "[내보내기] " : "[내보내기 실패] ") << saved.message << std::endl;
             }
@@ -283,12 +344,13 @@ int main(int argc, char** argv)
         glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
 
         renderer.RenderScene(scene, camera, fbWidth, fbHeight, stats);
+        renderer.RenderEditPoints(edit, scene, camera, fbWidth, fbHeight, stats);
 
         //--- UI ---
         if (!bench.ShouldSkipUI())
         {
             ui.BeginFrame();
-            ui.Draw(scene, renderer, camera, stats);
+            ui.Draw(scene, renderer, camera, stats, edit);
             ui.EndFrame();
         }
 
@@ -318,6 +380,7 @@ int main(int argc, char** argv)
 
     //--- 정리 ---
     ui.Shutdown();
+    edit.Shutdown();
     stats.Shutdown();
     renderer.Shutdown();
 

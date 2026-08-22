@@ -37,6 +37,11 @@ public:
     //(glNamedBufferStorage를 flags=0으로 만들었어도 읽기는 된다. 매핑이 아니라 복사라서)
     bool ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>& outIndices) const;
 
+    //정점 데이터를 GPU에 다시 올린다 (편집 모드에서 정점을 옮길 때).
+    //Upload에서 GL_DYNAMIC_STORAGE_BIT를 줬기 때문에 가능하다. 플래그 0으로 만든 불변 버퍼는
+    //내용 수정이 아예 거부된다 (GL_INVALID_OPERATION).
+    void UpdateVertices(const std::vector<Vertex>& vertices);
+
     unsigned int GetVAO() const { return vao; }
     unsigned int GetIndexCount() const { return indexCount; }
     unsigned int GetVertexCount() const { return vertexCount; }

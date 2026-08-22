@@ -7,6 +7,7 @@ class Scene;
 class Renderer;
 class OrbitCamera;
 class FrameStats;
+class EditMode;
 
 //Dear ImGui로 만든 에디터 패널들.
 //통계 표시를 창 제목(간단)과 ImGui 패널(본격) 두 군데에 다 넣어둔 이유:
@@ -19,7 +20,8 @@ public:
     void Shutdown();
 
     void BeginFrame();
-    void Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats);
+    void Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats,
+        EditMode& edit);
     void EndFrame();
 
     //ImGui가 마우스를 쓰고 있으면(패널 위에 커서가 있으면) 뷰포트 조작을 막아야 한다.
@@ -40,7 +42,7 @@ public:
 private:
     void DrawStatsPanel(const FrameStats& stats, Renderer& renderer);
     void DrawOutliner(Scene& scene);
-    void DrawInspector(Scene& scene, OrbitCamera& camera);
+    void DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit);
     void DrawFilePanel();
 
     unsigned int selectedId = 0;
