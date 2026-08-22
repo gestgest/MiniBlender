@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 
 #include <Config.h>
+#include <Render/Benchmark.h>
 #include <Render/FrameStats.h>
 #include <Render/OrbitCamera.h>
 #include <Render/Renderer.h>
@@ -27,7 +28,7 @@ void APIENTRY GLDebugCallback(GLenum source, GLenum type, unsigned int id, GLenu
 //스크롤은 콜백으로만 들어오는 이벤트라(폴링이 불가능) 여기 모았다가 프레임에서 소비한다
 static float g_scrollDelta = 0.0f;
 
-int main()
+int main(int argc, char** argv)
 {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
@@ -108,6 +109,17 @@ int main()
 
     OrbitCamera camera;
 
+    //측정 모드(인자 있음)면 씬을 자동 구성하고 vsync를 끈다. 인자가 없으면 전부 no-op.
+    Benchmark bench;
+    bench.ParseArgs(argc, argv);
+    if (!bench.Init(window, scene, camera))
+    {
+        renderer.Shutdown();
+        stats.Shutdown();
+        glfwTerminate();
+        return -1;
+    }
+
     EditorUI ui;
     ui.Init(window);
 
@@ -161,11 +173,18 @@ int main()
         renderer.RenderScene(scene, camera, fbWidth, fbHeight, stats);
 
         //--- UI ---
-        ui.BeginFrame();
-        ui.Draw(scene, renderer, camera, stats);
-        ui.EndFrame();
+        if (!bench.ShouldSkipUI())
+        {
+            ui.BeginFrame();
+            ui.Draw(scene, renderer, camera, stats);
+            ui.EndFrame();
+        }
 
         stats.EndFrame();
+
+        //측정이 끝나면 결과 한 줄을 찍고 종료한다
+        if (bench.Tick(stats))
+            glfwSetWindowShouldClose(window, true);
 
         //--- 통계를 창 제목에도 표시 ---
         //ImGui 패널과 중복이지만 의도적으로 남겨둔다: 의존성이 0이라 UI가 죽어도 살아있는 최후의 계기판.

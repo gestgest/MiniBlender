@@ -143,6 +143,7 @@
   <ItemGroup>
     <ClCompile Include="src\glad.c" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\cpp\Render\Benchmark.cpp" />
     <ClCompile Include="src\cpp\Render\FrameStats.cpp" />
     <ClCompile Include="src\cpp\Render\Mesh.cpp" />
     <ClCompile Include="src\cpp\Render\OrbitCamera.cpp" />
@@ -161,6 +162,7 @@
     <ClInclude Include="include\header\camera.h" />
     <ClInclude Include="include\header\shader.h" />
     <ClInclude Include="src\header\Config.h" />
+    <ClInclude Include="src\header\Render\Benchmark.h" />
     <ClInclude Include="src\header\Render\FrameStats.h" />
     <ClInclude Include="src\header\Render\Mesh.h" />
     <ClInclude Include="src\header\Render\OrbitCamera.h" />

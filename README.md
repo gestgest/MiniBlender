@@ -30,6 +30,37 @@ Visual Studio 2022로 `MiniBlender.sln`을 열고 **x64 / Debug** 로 빌드하�
 | 휠 | 줌 (거리에 비례) |
 | ESC | 종료 |
 
+## 측정 모드
+
+인자를 주고 실행하면 UI 없이 지정한 씬을 그린 뒤, 결과 한 줄을 찍고 자동 종료한다.
+
+```
+MiniBlender.exe <개수> [메시이름] [워밍업프레임] [샘플프레임]
+```
+
+```bash
+> MiniBlender.exe 10000 Cube
+[벤치] Cube x10000 (워밍업 120프레임, 샘플 300프레임)
+RESULT mesh=Cube n=10000 calls=10002 tris=120013 cpu=3.218 gpu=1.730 frame=3.384 fps=295.5
+```
+
+메시 이름은 `Cube`(기본) / `Plane` / `Sphere` / `Cylinder` / `HiSphere`.
+`HiSphere`는 고해상도 구(16,128 삼각형)의 ASCII 별칭이다 —
+argv가 콘솔 코드페이지로 들어와서 한글 메시 이름은 인자로 넘길 수 없다.
+
+측정 중에는 **vsync를 끄고 UI를 그리지 않는다.** vsync가 켜져 있으면 3ms 프레임과 12ms 프레임이
+똑같이 모니터 주사율에 맞춰져 구분이 안 되고, ImGui 렌더링 비용이 숫자에 섞이면 비교가 흐려진다.
+워밍업 프레임을 버리는 것도 같은 이유다 — 초반에는 셰이더 컴파일과 버퍼 업로드로 값이 크게 튄다.
+
+여러 조건을 한 번에 돌려 표를 만들 수 있다.
+
+```powershell
+foreach ($n in 100,500,1000,2000,5000,10000) { .\x64\Release\MiniBlender.exe $n Cube }
+```
+
+최적화 기법을 넣기 전후로 **같은 명령을 돌려 비교하는 것**이 이 프로젝트의 기본 작업 방식이다.
+측정 결과는 [`docs/devlog/`](docs/devlog/)에 정리한다.
+
 ## 구조
 
 ```

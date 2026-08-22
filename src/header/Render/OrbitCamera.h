@@ -23,6 +23,8 @@ public:
 
     //선택한 오브젝트로 시점 이동 (블렌더의 넘패드 . 에 해당)
     void FocusOn(const glm::vec3& point) { target = point; }
+    //씬 전체를 한눈에 담아야 할 때 (측정 모드에서 사용)
+    void SetDistance(float d) { distance = d; }
 
     glm::vec3 GetPosition() const;
     glm::mat4 GetViewMatrix() const;

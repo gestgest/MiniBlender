@@ -42,6 +42,9 @@
     <ClCompile Include="src\glad.c">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="src\cpp\Render\Benchmark.cpp">
+      <Filter>소스 파일\Render</Filter>
+    </ClCompile>
     <ClCompile Include="src\cpp\Render\FrameStats.cpp">
       <Filter>소스 파일\Render</Filter>
     </ClCompile>
@@ -91,6 +94,9 @@
     </ClInclude>
     <ClInclude Include="include\header\camera.h">
       <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Render\Benchmark.h">
+      <Filter>헤더 파일\Render</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Render\FrameStats.h">
       <Filter>헤더 파일\Render</Filter>
