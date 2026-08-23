@@ -1,5 +1,7 @@
 #include <UI/EditorUI.h>
 
+#include <UI/FileDialog.h>
+
 #include <Render/FrameStats.h>
 #include <Render/OrbitCamera.h>
 #include <Render/Renderer.h>
@@ -11,9 +13,12 @@
 #include <imgui/backends/imgui_impl_opengl3.h>
 
 #include <cstdio>
+#include <cstring>
 
 void EditorUI::Init(GLFWwindow* window)
 {
+    ownerWindow = window;
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
@@ -100,10 +105,36 @@ bool EditorUI::ConsumeSaveRequest(std::string& outPath)
     return true;
 }
 
+bool EditorUI::ConsumeDialogStall()
+{
+    const bool stalled = dialogStalled;
+    dialogStalled = false;
+    return stalled;
+}
+
 void EditorUI::SetImportMessage(const std::string& msg, bool isError)
 {
     importMessage = msg;
     importFailed = isError;
+}
+
+//모달 대화상자가 떠 있는 동안 GLFW는 마우스를 뗀 이벤트를 받지 못한다.
+//그대로 두면 ImGui가 버튼이 계속 눌려 있다고 믿어서, 대화상자를 닫자마자
+//커서 밑에 있던 위젯이 멋대로 드래그된다. 눌림 상태를 직접 풀어준다.
+static void ReleaseMouseAfterModal()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    for (int button = 0; button < 3; ++button)
+        io.AddMouseButtonEvent(button, false);
+}
+
+//대화상자에서 고른 경로를 입력창에도 되돌려 넣는다.
+//경로가 남아 있어야 무엇을 불러왔는지 보이고, 살짝 고쳐서 다시 쓸 수도 있다.
+static void CopyToBuffer(const std::string& path, char* buffer, size_t size)
+{
+    const size_t n = (path.size() < size - 1) ? path.size() : size - 1;
+    std::memcpy(buffer, path.c_str(), n);
+    buffer[n] = '\0';
 }
 
 void EditorUI::DrawFilePanel()
@@ -116,10 +147,30 @@ void EditorUI::DrawFilePanel()
         ImGui::SeparatorText("가져오기 (FBX)");
         ImGui::TextDisabled("창에 파일을 끌어다 놓아도 됩니다");
 
-        ImGui::SetNextItemWidth(-90.0f);
+        ImGui::SetNextItemWidth(-140.0f);
         //Enter로도 불러올 수 있게 (경로를 붙여넣고 바로 실행하는 흐름이 자연스럽다)
         const bool entered = ImGui::InputText("##path", pathBuffer, sizeof(pathBuffer),
             ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::SameLine();
+        //"..."는 윈도우 기본 열기 창을 띄운다. 입력창은 그대로 남겨둔다 —
+        //경로를 붙여넣거나 콘솔에서 복사해 오는 흐름이 대화상자보다 빠를 때가 많다.
+        if (ImGui::Button("...##open"))
+        {
+            const std::string picked = FileDialog::OpenModel(ownerWindow);
+            ReleaseMouseAfterModal();
+            dialogStalled = true;   //대화상자가 떠 있던 시간은 프레임 통계에서 뺀다
+
+            if (!picked.empty())
+            {
+                CopyToBuffer(picked, pathBuffer, sizeof(pathBuffer));
+                //고르는 순간이 곧 "불러와 달라"는 뜻이다. 버튼을 한 번 더 누르게 할 이유가 없다.
+                requestedPath = picked;
+                hasLoadRequest = true;
+            }
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("파일 찾아보기");
 
         ImGui::SameLine();
         const bool clicked = ImGui::Button("불러오기");
@@ -131,9 +182,28 @@ void EditorUI::DrawFilePanel()
         }
 
         ImGui::SeparatorText("내보내기 (확장자로 OBJ/FBX 결정)");
-        ImGui::SetNextItemWidth(-90.0f);
+        ImGui::SetNextItemWidth(-110.0f);
         const bool exportEntered = ImGui::InputText("##exportpath", exportPathBuffer, sizeof(exportPathBuffer),
             ImGuiInputTextFlags_EnterReturnsTrue);
+
+        ImGui::SameLine();
+        if (ImGui::Button("...##save"))
+        {
+            //입력창에 있던 값을 파일명 칸 초기값으로 넘겨서 확장자를 다시 고민하지 않게 한다
+            const std::string picked = FileDialog::SaveModel(ownerWindow, exportPathBuffer);
+            ReleaseMouseAfterModal();
+            dialogStalled = true;
+
+            if (!picked.empty())
+            {
+                CopyToBuffer(picked, exportPathBuffer, sizeof(exportPathBuffer));
+                //덮어쓰기 확인은 대화상자가 이미 받았으니 바로 내보낸다
+                requestedSavePath = picked;
+                hasSaveRequest = true;
+            }
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("저장 위치 고르기");
 
         ImGui::SameLine();
         const bool exportClicked = ImGui::Button("저장");

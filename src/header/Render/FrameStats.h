@@ -23,6 +23,11 @@ public:
     //프레임 끝 — GPU 타이머 끄고, 여유가 생긴 과거 쿼리 결과를 수거
     void EndFrame();
 
+    //이번 프레임에 렌더링과 무관하게 루프를 멈춘 일이 있었다고 알린다 (파일 대화상자 같은 모달 창).
+    //안 알리면 대화상자를 띄워둔 시간이 통째로 CPU 시간과 다음 프레임 간격에 얹혀서
+    //"CPU 8000ms, 0.1 FPS" 같은 가짜 스파이크가 그래프에 영구히 남는다.
+    void MarkFrameStalled() { stalledThisFrame = true; }
+
     //드로우콜 낼 때마다 불러준다. Renderer가 대신 호출해주니 직접 쓸 일은 별로 없음
     void AddDrawCall(unsigned int triangleCount)
     {
@@ -54,6 +59,12 @@ private:
 
     double frameStartTime = 0.0;
     double prevFrameStartTime = 0.0;
+
+    //멈춤은 두 프레임에 걸쳐 나타난다: 이번 프레임의 cpuMs와, 다음 프레임의 frameMs(프레임 간격).
+    //그래서 플래그도 두 개다.
+    bool stalledThisFrame = false;
+    bool skipNextDelta = false;
+
     float cpuMs = 0.0f;
     float gpuMs = 0.0f;
     float frameMs = 0.0f;

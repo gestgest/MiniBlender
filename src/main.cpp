@@ -352,6 +352,11 @@ int main(int argc, char** argv)
             ui.BeginFrame();
             ui.Draw(scene, renderer, camera, stats, edit);
             ui.EndFrame();
+
+            //파일 대화상자는 모달이라 떠 있는 동안 이 루프가 통째로 멈춘다.
+            //그 시간을 계측에 넣으면 "CPU 8000ms" 같은 가짜 스파이크가 그래프에 남는다.
+            if (ui.ConsumeDialogStall())
+                stats.MarkFrameStalled();
         }
 
         stats.EndFrame();

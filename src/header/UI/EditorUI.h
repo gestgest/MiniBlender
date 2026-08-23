@@ -35,6 +35,8 @@ public:
     //실제 로딩은 main이 처리한다 (UI가 로더/GL에 의존하지 않게 하려는 것).
     bool ConsumeLoadRequest(std::string& outPath);
     bool ConsumeSaveRequest(std::string& outPath);
+    //파일 대화상자를 띄운 프레임인지. 모달이라 그동안 루프가 멈춰서 통계에서 빼야 한다.
+    bool ConsumeDialogStall();
     //불러오기 결과를 패널에 표시하기 위해 돌려받는다
     void SetImportMessage(const std::string& msg, bool isError);
     void SetSelectedId(unsigned int id) { selectedId = id; }
@@ -44,6 +46,9 @@ private:
     void DrawOutliner(Scene& scene);
     void DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit);
     void DrawFilePanel();
+
+    //파일 대화상자를 띄울 때 부모 창으로 넘긴다 (모달로 앱 위에 뜨게 하려고)
+    GLFWwindow* ownerWindow = nullptr;
 
     unsigned int selectedId = 0;
 
@@ -58,6 +63,7 @@ private:
     std::string requestedSavePath;
     std::string importMessage;
     bool importFailed = false;
+    bool dialogStalled = false;
 
     //성능 그래프용 링버퍼. 숫자 하나만 보면 튀는 프레임(스파이크)을 놓친다.
     static const int HISTORY = 120;
