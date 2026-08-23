@@ -26,21 +26,33 @@ namespace
     }
 }
 
+namespace
+{
+    //위치만 담는 VAO 하나를 만든다. 전체 정점용과 선택 정점용이 형태가 같아서 함수로 묶었다.
+    void MakePointVAO(unsigned int& vao, unsigned int& vbo)
+    {
+        glCreateVertexArrays(1, &vao);
+        glCreateBuffers(1, &vbo);
+
+        glVertexArrayVertexBuffer(vao, 0, vbo, 0, sizeof(glm::vec3));
+        glEnableVertexArrayAttrib(vao, 0);
+        glVertexArrayAttribFormat(vao, 0, 3, GL_FLOAT, GL_FALSE, 0);
+        glVertexArrayAttribBinding(vao, 0, 0);
+    }
+}
+
 void EditMode::Init()
 {
-    glCreateVertexArrays(1, &pointVAO);
-    glCreateBuffers(1, &pointVBO);
-
-    glVertexArrayVertexBuffer(pointVAO, 0, pointVBO, 0, sizeof(glm::vec3));
-    glEnableVertexArrayAttrib(pointVAO, 0);
-    glVertexArrayAttribFormat(pointVAO, 0, 3, GL_FLOAT, GL_FALSE, 0);
-    glVertexArrayAttribBinding(pointVAO, 0, 0);
+    MakePointVAO(pointVAO, pointVBO);
+    MakePointVAO(selectedVAO, selectedVBO);
 }
 
 void EditMode::Shutdown()
 {
     if (pointVAO != 0) { glDeleteVertexArrays(1, &pointVAO); pointVAO = 0; }
     if (pointVBO != 0) { glDeleteBuffers(1, &pointVBO); pointVBO = 0; }
+    if (selectedVAO != 0) { glDeleteVertexArrays(1, &selectedVAO); selectedVAO = 0; }
+    if (selectedVBO != 0) { glDeleteBuffers(1, &selectedVBO); selectedVBO = 0; }
 }
 
 bool EditMode::Enter(Scene& scene, unsigned int id)
@@ -78,9 +90,26 @@ bool EditMode::Enter(Scene& scene, unsigned int id)
         }
     }
 
-    selected = -1;
+    //용접 그룹의 노멀을 평균 내 둔다. 박스 선택에서 "카메라를 등진 정점"을 쳐낼 때 쓴다.
+    //면마다 노멀이 달라서 한 자리에 여러 개가 겹쳐 있는데, 그 평균이 그 자리의 바깥 방향이다.
+    uniqueNormals.assign(uniquePositions.size(), glm::vec3(0.0f));
+    for (size_t u = 0; u < weldGroups.size(); ++u)
+    {
+        glm::vec3 sum(0.0f);
+        for (unsigned int vi : weldGroups[u])
+            sum += vertices[vi].normal;
+
+        //길이가 0이면(정확히 반대인 노멀들이 상쇄) 방향을 알 수 없다. 0으로 두면 뒤에서 판정을 건너뛴다.
+        uniqueNormals[u] = (glm::dot(sum, sum) > 1e-12f) ? glm::normalize(sum) : glm::vec3(0.0f);
+    }
+
+    selectedFlags.assign(uniquePositions.size(), 0);
+    selectedCount = 0;
+    activeVertex = -1;
+
     active = true;
     UploadPoints();
+    UploadSelectedPoints();
     return true;
 }
 
@@ -137,12 +166,21 @@ void EditMode::RefreshIfEditing(Scene& scene, const Mesh* changedMesh)
         return;
 
     const unsigned int id = objectId;
-    const int keepSelected = selected;
+
+    //Enter가 선택을 날려버리므로 잠시 빼돌린다
+    std::vector<char> keepFlags = selectedFlags;
+    const int keepCount = selectedCount;
+    const int keepActive = activeVertex;
 
     //Enter가 GPU에서 다시 읽어 용접 그룹까지 새로 만든다.
     //정점 위치만 바뀌고 개수는 그대로라 그룹 구성도 같으니, 선택은 그대로 살려둔다.
-    if (Enter(scene, id) && keepSelected >= 0 && keepSelected < (int)uniquePositions.size())
-        selected = keepSelected;
+    if (Enter(scene, id) && keepFlags.size() == selectedFlags.size())
+    {
+        selectedFlags = std::move(keepFlags);
+        selectedCount = keepCount;
+        activeVertex = (keepActive < (int)uniquePositions.size()) ? keepActive : -1;
+        UploadSelectedPoints();
+    }
 }
 
 void EditMode::Exit()
@@ -150,11 +188,16 @@ void EditMode::Exit()
     active = false;
     objectId = 0;
     targetMesh = nullptr;
-    selected = -1;
     vertices.clear();
     indices.clear();
     uniquePositions.clear();
+    uniqueNormals.clear();
     weldGroups.clear();
+
+    selectedFlags.clear();
+    selectedCount = 0;
+    activeVertex = -1;
+    boxSelecting = false;
 
     //기록 중이던 스트로크는 버린다. Enter가 Exit을 먼저 부르기 때문에
     //RefreshIfEditing 도중에도 여기를 지나는데, 그때 남은 사본은 이미 쓸모가 없다.
@@ -172,6 +215,81 @@ void EditMode::UploadPoints()
     glNamedBufferData(pointVBO,
         (GLsizeiptr)(uniquePositions.size() * sizeof(glm::vec3)),
         uniquePositions.data(), GL_STREAM_DRAW);
+}
+
+void EditMode::UploadSelectedPoints()
+{
+    if (selectedCount <= 0)
+        return;   //그릴 게 없으면 버퍼도 건드리지 않는다. 렌더러가 개수를 보고 건너뛴다.
+
+    //선택된 것만 추려서 따로 올린다. 전체 버퍼에 "선택됨" 속성을 하나 더 다는 방법도 있지만,
+    //그러면 강조 정점만 깊이 테스트 없이 그리는 지금 방식(두 패스)을 쓸 수 없다.
+    std::vector<glm::vec3> picked;
+    picked.reserve((size_t)selectedCount);
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        if (selectedFlags[i])
+            picked.push_back(uniquePositions[i]);
+    }
+
+    glNamedBufferData(selectedVBO,
+        (GLsizeiptr)(picked.size() * sizeof(glm::vec3)),
+        picked.data(), GL_STREAM_DRAW);
+}
+
+//--- 선택 조작 ---
+
+bool EditMode::IsSelected(int index) const
+{
+    return index >= 0 && index < (int)selectedFlags.size() && selectedFlags[index] != 0;
+}
+
+void EditMode::SetSelectedFlag(size_t index, bool on)
+{
+    if (index >= selectedFlags.size())
+        return;
+
+    const bool was = selectedFlags[index] != 0;
+    if (was == on)
+        return;
+
+    selectedFlags[index] = on ? 1 : 0;
+    selectedCount += on ? 1 : -1;
+}
+
+void EditMode::ClearSelection()
+{
+    std::fill(selectedFlags.begin(), selectedFlags.end(), (char)0);
+    selectedCount = 0;
+    activeVertex = -1;
+    UploadSelectedPoints();
+}
+
+void EditMode::SelectOnly(int index)
+{
+    std::fill(selectedFlags.begin(), selectedFlags.end(), (char)0);
+    selectedCount = 0;
+    activeVertex = -1;
+
+    if (index >= 0 && index < (int)selectedFlags.size())
+    {
+        SetSelectedFlag((size_t)index, true);
+        activeVertex = index;
+    }
+    UploadSelectedPoints();
+}
+
+void EditMode::ToggleSelection(int index)
+{
+    if (index < 0 || index >= (int)selectedFlags.size())
+        return;
+
+    const bool nowOn = (selectedFlags[index] == 0);
+    SetSelectedFlag((size_t)index, nowOn);
+
+    //켜면 그게 활성 정점이 되고, 끄면 활성 자리를 비운다
+    activeVertex = nowOn ? index : -1;
+    UploadSelectedPoints();
 }
 
 bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) const
@@ -224,12 +342,21 @@ bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) cons
     return false;
 }
 
-void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
+bool EditMode::IsBackFacing(size_t uniqueIndex, const glm::vec3& camLocalPos) const
+{
+    const glm::vec3& n = uniqueNormals[uniqueIndex];
+    if (glm::dot(n, n) < 1e-12f)
+        return false;   //방향을 모르면 가려졌다고 단정하지 않는다
+
+    return glm::dot(n, camLocalPos - uniquePositions[uniqueIndex]) <= 0.0f;
+}
+
+int EditMode::PickVertexAt(float mouseX, float mouseY, int screenW, int screenH,
     const glm::mat4& viewProj, const glm::mat4& model,
-    const glm::vec3& camWorldPos, float maxPixelDistance)
+    const glm::vec3& camWorldPos, float maxPixelDistance) const
 {
     if (!active)
-        return;
+        return -1;
 
     const glm::mat4 mvp = viewProj * model;
     const float maxDist2 = maxPixelDistance * maxPixelDistance;
@@ -264,10 +391,7 @@ void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
     }
 
     if (candidates.empty())
-    {
-        selected = -1;
-        return;
-    }
+        return -1;
 
     //화면 거리가 가까운 순, 거리가 사실상 같으면(1픽셀² 이내) 카메라에 가까운 순.
     //거리를 floor로 뭉개서 비교하는 건 정렬 규칙을 성립시키기 위해서다 —
@@ -279,10 +403,7 @@ void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
         });
 
     if (xray)
-    {
-        selected = (int)candidates.front().index;
-        return;
-    }
+        return (int)candidates.front().index;
 
     //--- X-Ray 꺼짐: 가려진 후보는 건너뛴다 ---
     //광선 검사는 삼각형 전체를 훑지만(O(삼각형 수)), 후보는 보통 한두 개고
@@ -292,25 +413,166 @@ void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
     for (const Candidate& c : candidates)
     {
         if (!IsOccluded(c.index, camLocal))
+            return (int)c.index;
+    }
+
+    //전부 가려져 있다 = 지금 각도에서 만질 수 있는 정점이 없다
+    return -1;
+}
+
+//--- 박스(러버밴드) 선택 ---
+
+void EditMode::BeginBoxSelect(float mouseX, float mouseY)
+{
+    if (!active)
+        return;
+
+    boxSelecting = true;
+    boxStartX = boxCurX = mouseX;
+    boxStartY = boxCurY = mouseY;
+}
+
+void EditMode::UpdateBoxSelect(float mouseX, float mouseY)
+{
+    if (!boxSelecting)
+        return;
+
+    boxCurX = mouseX;
+    boxCurY = mouseY;
+}
+
+void EditMode::CancelBoxSelect()
+{
+    boxSelecting = false;
+}
+
+void EditMode::GetBoxRect(float& outMinX, float& outMinY, float& outMaxX, float& outMaxY) const
+{
+    //어느 방향으로 끌었든 좌상단/우하단으로 정규화해서 넘긴다
+    outMinX = std::fmin(boxStartX, boxCurX);
+    outMaxX = std::fmax(boxStartX, boxCurX);
+    outMinY = std::fmin(boxStartY, boxCurY);
+    outMaxY = std::fmax(boxStartY, boxCurY);
+}
+
+void EditMode::EndBoxSelect(int screenW, int screenH, const glm::mat4& viewProj,
+    const glm::mat4& model, const glm::vec3& camWorldPos, bool additive)
+{
+    if (!boxSelecting)
+        return;
+
+    boxSelecting = false;
+    if (!active)
+        return;
+
+    float minX, minY, maxX, maxY;
+    GetBoxRect(minX, minY, maxX, maxY);
+
+    //손이 떨려서 몇 픽셀 움직인 건 드래그가 아니라 클릭이다.
+    //빈 곳 클릭은 선택 해제 — 블렌더와 같다.
+    const float DRAG_THRESHOLD = 3.0f;
+    const bool isClick = (maxX - minX) < DRAG_THRESHOLD && (maxY - minY) < DRAG_THRESHOLD;
+
+    if (!additive)
+    {
+        std::fill(selectedFlags.begin(), selectedFlags.end(), (char)0);
+        selectedCount = 0;
+        activeVertex = -1;
+    }
+
+    if (isClick)
+    {
+        UploadSelectedPoints();
+        return;
+    }
+
+    //--- 사각형 안에 들어오는 정점 모으기 ---
+    const glm::mat4 mvp = viewProj * model;
+
+    std::vector<size_t> inside;
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        glm::vec4 clip = mvp * glm::vec4(uniquePositions[i], 1.0f);
+        if (clip.w <= 0.0f)
+            continue;
+
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        const float sx = (ndc.x * 0.5f + 0.5f) * (float)screenW;
+        const float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * (float)screenH;
+
+        if (sx >= minX && sx <= maxX && sy >= minY && sy <= maxY)
+            inside.push_back(i);
+    }
+
+    if (!xray && !inside.empty())
+    {
+        //X-Ray가 꺼져 있으면 가려진 정점은 빼야 하는데, 여기선 후보가 수천 개까지 간다.
+        //정확한 광선 검사는 후보당 삼각형 전체를 훑어서 (후보 x 삼각형) 만큼 든다 —
+        //큰 메시를 통째로 감싸면 마우스를 놓는 순간 몇 초씩 멈출 수 있다.
+        //
+        //그래서 두 단계로 간다:
+        //  1) 카메라를 등진 정점을 노멀로 먼저 쳐낸다 (공짜, 보통 절반이 날아간다)
+        //  2) 남은 게 예산 안이면 정확한 광선 검사까지, 넘으면 1번 결과로 만족한다
+        //볼록한 모양에선 1번만으로도 정확하고, 오목한 부분에서만 조금 후하게 잡힌다.
+        const glm::vec3 camLocal = glm::vec3(glm::inverse(model) * glm::vec4(camWorldPos, 1.0f));
+
+        std::vector<size_t> facing;
+        facing.reserve(inside.size());
+        for (size_t i : inside)
         {
-            selected = (int)c.index;
-            return;
+            if (!IsBackFacing(i, camLocal))
+                facing.push_back(i);
+        }
+
+        //광선 검사 예산. 요즘 CPU가 한 프레임(16ms)에 소화할 만한 규모로 잡았다.
+        const size_t RAY_BUDGET = 4000000;
+        const size_t triangles = indices.size() / 3;
+
+        if (triangles > 0 && facing.size() * triangles <= RAY_BUDGET)
+        {
+            std::vector<size_t> visible;
+            visible.reserve(facing.size());
+            for (size_t i : facing)
+            {
+                if (!IsOccluded(i, camLocal))
+                    visible.push_back(i);
+            }
+            inside.swap(visible);
+        }
+        else
+        {
+            inside.swap(facing);
         }
     }
 
-    //전부 가려져 있다 = 지금 각도에서 만질 수 있는 정점이 없다. 선택을 푸는 게 정직하다.
-    selected = -1;
+    for (size_t i : inside)
+        SetSelectedFlag(i, true);
+
+    if (!inside.empty())
+        activeVertex = (int)inside.back();
+
+    UploadSelectedPoints();
 }
 
 void EditMode::DragSelected(float dxPixels, float dyPixels, const OrbitCamera& camera,
     int screenH, const glm::mat4& model)
 {
-    if (!active || selected < 0)
+    if (!active || selectedCount <= 0)
         return;
+
+    //선택이 여럿이면 무게중심을 기준으로 깊이를 잡는다.
+    //정점마다 제 깊이로 환산하면 같은 드래그에도 앞뒤가 서로 다른 거리를 움직여서 모양이 일그러진다.
+    glm::vec3 centroid(0.0f);
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        if (selectedFlags[i])
+            centroid += uniquePositions[i];
+    }
+    centroid /= (float)selectedCount;
 
     //화면과 나란한 평면 위에서 옮긴다. 1픽셀이 월드에서 몇 미터인지는 카메라와의 거리에 비례한다.
     //(멀리 있는 정점일수록 같은 픽셀 이동에 더 많이 움직여야 손끝 감각이 일정하다)
-    const glm::vec3 worldPos = glm::vec3(model * glm::vec4(uniquePositions[selected], 1.0f));
+    const glm::vec3 worldPos = glm::vec3(model * glm::vec4(centroid, 1.0f));
     const glm::vec3 camPos = camera.GetPosition();
     const glm::vec3 forward = glm::normalize(camera.GetTarget() - camPos);
 
@@ -326,46 +588,65 @@ void EditMode::DragSelected(float dxPixels, float dyPixels, const OrbitCamera& c
 
     //월드 이동량을 오브젝트 로컬 공간으로 되돌린다 (오브젝트가 회전/스케일돼 있을 수 있으므로)
     const glm::mat3 invModel = glm::inverse(glm::mat3(model));
-    uniquePositions[selected] += invModel * worldDelta;
+    const glm::vec3 localDelta = invModel * worldDelta;
+
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        if (selectedFlags[i])
+            uniquePositions[i] += localDelta;
+    }
 
     ApplyPositionChange();
 }
 
 void EditMode::SetSelectedPosition(const glm::vec3& localPos)
 {
-    if (!active || selected < 0)
+    if (!active || activeVertex < 0)
         return;
 
-    uniquePositions[selected] = localPos;
+    //숫자 입력은 활성 정점 하나만 옮긴다.
+    //여럿을 같은 좌표로 몰아넣으면 메시가 한 점으로 접혀버려서, 실수로 그럴 여지를 두지 않는다.
+    uniquePositions[activeVertex] = localPos;
     ApplyPositionChange();
 }
 
 glm::vec3 EditMode::GetSelectedPosition() const
 {
-    if (!active || selected < 0)
+    if (!active || activeVertex < 0)
         return glm::vec3(0.0f);
-    return uniquePositions[selected];
+    return uniquePositions[activeVertex];
 }
 
 void EditMode::ApplyPositionChange()
 {
-    //1) 용접 그룹에 속한 실제 정점들을 전부 같은 위치로
-    for (unsigned int vi : weldGroups[selected])
-        vertices[vi].position = uniquePositions[selected];
+    //1) 선택된 논리 정점들의 용접 그룹을 전부 같은 위치로 옮기고, 옮긴 실제 정점에 표시를 남긴다.
+    //   표시를 남기는 이유는 2번 때문이다 — 삼각형마다 "선택된 그룹에 속하나?"를 되묻는 대신
+    //   여기서 한 번 칠해두면 노멀 갱신이 (정점 수 + 삼각형 수) 한 바퀴로 끝난다.
+    //   박스로 수천 개를 선택하면 이 차이가 그대로 드래그 프레임의 끊김이 된다.
+    //드래그 중 매 프레임 도는 함수라 배열을 새로 잡지 않고 멤버 하나를 재사용한다
+    touchedScratch.assign(vertices.size(), 0);
+    std::vector<char>& touched = touchedScratch;
 
-    //2) 이 정점이 속한 삼각형들의 노멀을 다시 계산한다.
+    for (size_t u = 0; u < uniquePositions.size(); ++u)
+    {
+        if (!selectedFlags[u])
+            continue;
+
+        for (unsigned int vi : weldGroups[u])
+        {
+            vertices[vi].position = uniquePositions[u];
+            touched[vi] = 1;
+        }
+    }
+
+    //2) 옮긴 정점이 낀 삼각형들의 노멀을 다시 계산한다.
     //   면 노멀(평평한 셰이딩) 방식이라, 원래 부드럽게 셰이딩되던 메시는 편집한 부분만 각져 보인다.
     //   불러오는 모델이 대부분 로우폴리 평면 셰이딩이라 이 방식이 자연스럽고 계산도 국소적이다.
     for (size_t i = 0; i + 2 < indices.size(); i += 3)
     {
         const unsigned int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
 
-        bool touched = false;
-        for (unsigned int vi : weldGroups[selected])
-        {
-            if (vi == i0 || vi == i1 || vi == i2) { touched = true; break; }
-        }
-        if (!touched)
+        if (!touched[i0] && !touched[i1] && !touched[i2])
             continue;
 
         const glm::vec3 e1 = vertices[i1].position - vertices[i0].position;
@@ -387,4 +668,5 @@ void EditMode::ApplyPositionChange()
         targetMesh->UpdateVertices(vertices);
 
     UploadPoints();
+    UploadSelectedPoints();
 }

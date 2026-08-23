@@ -84,6 +84,22 @@ void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const
     DrawFilePanel();
     DrawOutliner(scene, history);
     DrawInspector(scene, camera, edit, history);
+    DrawBoxSelect(edit);
+}
+
+void EditorUI::DrawBoxSelect(const EditMode& edit)
+{
+    if (!edit.IsBoxSelecting())
+        return;
+
+    float minX, minY, maxX, maxY;
+    edit.GetBoxRect(minX, minY, maxX, maxY);
+
+    //전경 드로우리스트를 쓰면 창 하나 없이 화면 맨 위에 그릴 수 있다.
+    //이것 때문에 셰이더와 VAO를 따로 만드는 건 과하다 — 어차피 UI가 켜져 있을 때만 쓰는 표시다.
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    draw->AddRectFilled(ImVec2(minX, minY), ImVec2(maxX, maxY), IM_COL32(120, 170, 255, 40));
+    draw->AddRect(ImVec2(minX, minY), ImVec2(maxX, maxY), IM_COL32(150, 200, 255, 200));
 }
 
 bool EditorUI::ConsumeLoadRequest(std::string& outPath)
@@ -473,18 +489,22 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit, 
                         "켜면: 메시를 통과해 뒤쪽 정점까지 보이고 잡힙니다.");
                 }
 
-                if (edit.GetSelected() < 0)
+                if (edit.GetSelectedCount() == 0)
                 {
-                    ImGui::TextDisabled("정점을 클릭해서 선택하세요");
-                    ImGui::TextDisabled("선택 후 드래그하면 이동합니다");
+                    ImGui::TextDisabled("정점 클릭 = 선택, 드래그 = 이동");
+                    ImGui::TextDisabled("빈 곳에서 드래그 = 박스 선택");
+                    ImGui::TextDisabled("Shift + 클릭 = 선택에 추가/제외");
                     if (!edit.IsXRay())
                         ImGui::TextDisabled("뒤쪽 정점은 시점을 돌리거나 Alt+Z");
                 }
                 else
                 {
-                    ImGui::Text("선택: #%d", edit.GetSelected());
+                    ImGui::Text("선택: %d개 (활성 #%d)", edit.GetSelectedCount(), edit.GetActiveVertex());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("해제"))
+                        edit.ClearSelection();
 
-                    //숫자로도 편집할 수 있게 (드래그는 화면 평면 위로만 움직이니 정밀 조정용)
+                    //숫자 편집은 활성 정점 하나에만 적용된다 (여럿을 한 점으로 접지 않으려고)
                     glm::vec3 pos = edit.GetSelectedPosition();
                     const bool moved = ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f);
 

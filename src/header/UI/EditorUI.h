@@ -53,6 +53,8 @@ private:
     void DrawStatsPanel(const FrameStats& stats, Renderer& renderer);
     void DrawOutliner(Scene& scene, History& history);
     void DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit, History& history);
+    //박스 선택 사각형. 패널이 아니라 화면 전체 위에 겹쳐 그리는 표시라 따로 뺐다.
+    void DrawBoxSelect(const EditMode& edit);
     void DrawFilePanel();
 
     //파일 대화상자를 띄울 때 부모 창으로 넘긴다 (모달로 앱 위에 뜨게 하려고)

@@ -152,17 +152,19 @@ void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
     glDrawArrays(GL_POINTS, 0, edit.GetVertexCount());
     stats.AddDrawCall(0);
 
-    //2) 선택된 정점만 크고 밝게 덧그린다.
+    //2) 선택된 정점을 크고 밝게 덧그린다. 선택된 것만 모아둔 버퍼가 따로 있어서
+    //   개수와 상관없이 드로우콜 하나로 끝난다.
     //   이건 X-Ray와 무관하게 항상 깊이 테스트 없이 그린다 —
     //   시점을 돌리다 선택한 정점이 메시 뒤로 넘어가면 화면에서 사라지는데,
     //   드래그는 여전히 먹어서 "내가 뭘 잡고 있는지" 알 수 없어진다.
-    if (edit.GetSelected() >= 0)
+    if (edit.GetSelectedCount() > 0)
     {
         glDisable(GL_DEPTH_TEST);
         pointShader->setFloat("depthNudge", 0.0f);
         pointShader->setFloat("pointSize", 12.0f);
         pointShader->setVec3("pointColor", glm::vec3(1.0f, 0.65f, 0.1f));
-        glDrawArrays(GL_POINTS, edit.GetSelected(), 1);
+        glBindVertexArray(edit.GetSelectedVAO());
+        glDrawArrays(GL_POINTS, 0, edit.GetSelectedCount());
         stats.AddDrawCall(0);
     }
 

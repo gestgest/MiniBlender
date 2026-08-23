@@ -228,6 +228,8 @@ int main(int argc, char** argv)
     bool tabWasDown = false;
     bool leftWasDown = false;
     bool pickWasDown = false;
+    //이번 좌클릭이 정점 이동인지(true) 박스 선택인지(false). 누른 순간에 정해진다.
+    bool vertexDragging = false;
     bool deleteWasDown = false;
     bool xrayWasDown = false;
     bool undoWasDown = false;
@@ -297,23 +299,58 @@ int main(int argc, char** argv)
                 const glm::mat4 model = target ? target->transform.GetMatrix() : glm::mat4(1.0f);
                 const float aspect = (fbH > 0) ? (float)fbW / (float)fbH : 1.0f;
                 const glm::mat4 viewProj = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
+                const glm::vec3 camPos = camera.GetPosition();
 
                 const bool leftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+                const bool shiftDown = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+                    || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
-                //누르는 순간에만 선택. 누른 채 움직이면 드래그로 넘어간다.
+                //누른 자리에 정점이 있었는지가 이번 드래그의 성격을 정한다.
+                //  정점 위에서 시작 -> 이동
+                //  빈 곳에서 시작   -> 박스 선택
+                //블렌더와 같은 구분이고, 둘 다 좌클릭 드래그라 이 판단이 없으면 서로를 잡아먹는다.
                 if (leftDown && !leftWasDown)
                 {
-                    edit.PickAt((float)mx, (float)my, fbW, fbH, viewProj, model, camera.GetPosition());
-                    //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
-                    edit.BeginStroke();
+                    const int hit = edit.PickVertexAt((float)mx, (float)my, fbW, fbH,
+                        viewProj, model, camPos);
+
+                    if (hit >= 0)
+                    {
+                        if (shiftDown)
+                            edit.ToggleSelection(hit);
+                        else if (!edit.IsSelected(hit))
+                            edit.SelectOnly(hit);
+                        //이미 선택된 정점을 다시 누른 경우는 선택을 건드리지 않는다.
+                        //여럿 골라놓고 그중 하나를 잡아 통째로 끌 수 있어야 하니까.
+
+                        //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
+                        edit.BeginStroke();
+                        vertexDragging = edit.GetSelectedCount() > 0;
+                    }
+                    else
+                    {
+                        vertexDragging = false;
+                        edit.BeginBoxSelect((float)mx, (float)my);
+                    }
                 }
-                else if (leftDown && (dx != 0.0f || dy != 0.0f))
+                else if (leftDown)
                 {
-                    edit.DragSelected(dx, dy, camera, fbH, model);
+                    if (vertexDragging && (dx != 0.0f || dy != 0.0f))
+                        edit.DragSelected(dx, dy, camera, fbH, model);
+                    else if (edit.IsBoxSelecting())
+                        edit.UpdateBoxSelect((float)mx, (float)my);
                 }
                 else if (!leftDown && leftWasDown)
                 {
-                    edit.CommitStroke(history, "정점 이동");
+                    if (vertexDragging)
+                    {
+                        edit.CommitStroke(history, "정점 이동");
+                        vertexDragging = false;
+                    }
+                    else
+                    {
+                        edit.EndBoxSelect(fbW, fbH, viewProj, model, camPos, shiftDown);
+                    }
                 }
 
                 leftWasDown = leftDown;
@@ -322,8 +359,13 @@ int main(int argc, char** argv)
             {
                 //패널 위로 커서가 넘어가거나 편집 모드를 나가도 끌던 건 마무리해야 한다.
                 //안 그러면 기록이 열린 채 남아서 다음 스트로크에 통째로 섞인다.
-                if (leftWasDown)
+                if (leftWasDown && vertexDragging)
                     edit.CommitStroke(history, "정점 이동");
+
+                //그리다 만 선택 사각형은 그냥 버린다. 커서가 패널로 빠진 시점의
+                //사각형으로 선택을 바꾸면 사용자가 의도하지 않은 범위가 잡힌다.
+                edit.CancelBoxSelect();
+                vertexDragging = false;
                 leftWasDown = false;
             }
         }
