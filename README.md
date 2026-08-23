@@ -1,4 +1,5 @@
 # MiniBlender
+<img width="1284" height="752" alt="image" src="https://github.com/user-attachments/assets/fc5742e2-9605-4ff5-ad79-ed8ccf675c2c" />
 
 C++/OpenGL 4.6으로 만드는 미니 3D 에디터. 블렌더 같은 DCC 툴의 뼈대를 직접 구현하면서
 **드로우콜 최적화 기법을 하나씩 넣어보는 게 목표**인 학습 프로젝트다.
