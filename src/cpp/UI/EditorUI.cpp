@@ -367,7 +367,7 @@ void EditorUI::DrawOutliner(Scene& scene, History& history)
             //우클릭 컨텍스트 메뉴
             if (ImGui::BeginPopupContextItem())
             {
-                if (ImGui::MenuItem("삭제"))
+                if (ImGui::MenuItem("삭제", "Del"))
                     toDelete = obj.id;
                 ImGui::EndPopup();
             }
@@ -462,10 +462,23 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit, 
 
                 ImGui::Text("정점 %d개", edit.GetVertexCount());
 
+                //앞뒤 정점이 겹쳐 보이는 문제를 다루는 스위치. 단축키는 블렌더와 같은 Alt+Z.
+                bool xray = edit.IsXRay();
+                if (ImGui::Checkbox("X-Ray (Alt+Z)", &xray))
+                    edit.SetXRay(xray);
+                if (ImGui::IsItemHovered())
+                {
+                    ImGui::SetTooltip(
+                        "끄면: 면에 가려진 정점은 숨고 선택도 안 됩니다 (앞면만 편집).\n"
+                        "켜면: 메시를 통과해 뒤쪽 정점까지 보이고 잡힙니다.");
+                }
+
                 if (edit.GetSelected() < 0)
                 {
                     ImGui::TextDisabled("정점을 클릭해서 선택하세요");
                     ImGui::TextDisabled("선택 후 드래그하면 이동합니다");
+                    if (!edit.IsXRay())
+                        ImGui::TextDisabled("뒤쪽 정점은 시점을 돌리거나 Alt+Z");
                 }
                 else
                 {

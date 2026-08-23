@@ -115,16 +115,35 @@ void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
         return;
 
     const float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
-    const glm::mat4 mvp = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()
-        * obj->transform.GetMatrix();
+    const glm::mat4 projection = camera.GetProjectionMatrix(aspect);
+    const glm::mat4 modelView = camera.GetViewMatrix() * obj->transform.GetMatrix();
 
-    //깊이 테스트를 끈다: 정점은 면에 딱 붙어 있어서 z-파이팅으로 깜빡이고,
-    //뒷면의 정점도 보여야 반대편을 편집할 수 있다(블렌더도 기본이 이렇다).
-    glDisable(GL_DEPTH_TEST);
     glEnable(GL_PROGRAM_POINT_SIZE);   //셰이더에서 gl_PointSize를 쓰려면 필요
 
     pointShader->use();
-    pointShader->setMat4("mvp", mvp);
+    pointShader->setMat4("modelView", modelView);
+    pointShader->setMat4("projection", projection);
+
+    if (edit.IsXRay())
+    {
+        //X-Ray: 깊이 테스트를 끄면 메시를 통과해서 뒤쪽 정점까지 전부 보인다.
+        //반대편을 편집할 때 필요하지만, 앞뒤가 겹쳐 보여서 어느 게 앞인지 알 수 없다.
+        glDisable(GL_DEPTH_TEST);
+        pointShader->setFloat("depthNudge", 0.0f);
+    }
+    else
+    {
+        //X-Ray 끔: 면에 가려진 정점은 GPU가 알아서 버린다 — 보이는 것만 만지게 된다.
+        //  LEQUAL + 뷰 공간 밀어내기: 정점은 면 위에 정확히 얹혀 있어서 그냥 켜면
+        //  자기가 붙은 면과 깊이가 같아 깜빡인다. 카메라 쪽으로 아주 조금 당겨 확실히 이기게 한다.
+        //  밀어내는 양을 카메라 거리에 비례시키는 이유: 모델 크기가 0.01이든 1000이든
+        //  화면에서 차지하는 크기는 비슷해서, 화면 기준으로 일정한 양이 되어야 한다.
+        //  깊이 쓰기는 끈다. 점이 깊이 버퍼를 오염시키면 뒤에 그릴 것들이 엉뚱하게 가려진다.
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_FALSE);
+        pointShader->setFloat("depthNudge", camera.GetDistance() * 0.004f);
+    }
 
     //1) 전체 정점
     pointShader->setFloat("pointSize", 7.0f);
@@ -133,16 +152,24 @@ void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
     glDrawArrays(GL_POINTS, 0, edit.GetVertexCount());
     stats.AddDrawCall(0);
 
-    //2) 선택된 정점만 크고 밝게 덧그린다
+    //2) 선택된 정점만 크고 밝게 덧그린다.
+    //   이건 X-Ray와 무관하게 항상 깊이 테스트 없이 그린다 —
+    //   시점을 돌리다 선택한 정점이 메시 뒤로 넘어가면 화면에서 사라지는데,
+    //   드래그는 여전히 먹어서 "내가 뭘 잡고 있는지" 알 수 없어진다.
     if (edit.GetSelected() >= 0)
     {
+        glDisable(GL_DEPTH_TEST);
+        pointShader->setFloat("depthNudge", 0.0f);
         pointShader->setFloat("pointSize", 12.0f);
         pointShader->setVec3("pointColor", glm::vec3(1.0f, 0.65f, 0.1f));
         glDrawArrays(GL_POINTS, edit.GetSelected(), 1);
         stats.AddDrawCall(0);
     }
 
+    //다음 패스가 기본 상태를 기대하므로 되돌려 놓는다
     glDisable(GL_PROGRAM_POINT_SIZE);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
     glEnable(GL_DEPTH_TEST);
     glBindVertexArray(0);
 }

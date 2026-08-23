@@ -228,6 +228,8 @@ int main(int argc, char** argv)
     bool tabWasDown = false;
     bool leftWasDown = false;
     bool pickWasDown = false;
+    bool deleteWasDown = false;
+    bool xrayWasDown = false;
     bool undoWasDown = false;
     bool redoWasDown = false;
 
@@ -301,7 +303,7 @@ int main(int argc, char** argv)
                 //누르는 순간에만 선택. 누른 채 움직이면 드래그로 넘어간다.
                 if (leftDown && !leftWasDown)
                 {
-                    edit.PickAt((float)mx, (float)my, fbW, fbH, viewProj, model);
+                    edit.PickAt((float)mx, (float)my, fbW, fbH, viewProj, model, camera.GetPosition());
                     //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
                     edit.BeginStroke();
                 }
@@ -326,6 +328,24 @@ int main(int argc, char** argv)
             }
         }
 
+        //--- X-Ray 토글 (Alt+Z, 블렌더와 같은 키) ---
+        //정점 편집이 힘든 이유의 절반은 앞뒤 정점이 화면에서 겹쳐 보이는 것이다.
+        //꺼두면 보이는 면의 정점만 남아서 클릭이 정확해지고, 반대편을 만질 때만 켠다.
+        {
+            const bool altDown = glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS
+                || glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS;
+            const bool xrayDown = altDown && glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
+
+            if (xrayDown && !xrayWasDown && !ui.WantCaptureKeyboard())
+            {
+                edit.ToggleXRay();
+                ui.SetImportMessage(edit.IsXRay()
+                    ? "X-Ray 켬 — 뒤쪽 정점까지 보이고 선택됩니다"
+                    : "X-Ray 끔 — 보이는 면의 정점만 선택됩니다", false);
+            }
+            xrayWasDown = xrayDown;
+        }
+
         //--- 뷰포트에서 오브젝트 선택 ---
         //아웃라이너에서만 고를 수 있으면 모델을 눈앞에 두고도 목록에서 이름을 찾아야 한다.
         {
@@ -342,6 +362,30 @@ int main(int argc, char** argv)
                 //빈 곳을 누르면 0이 돌아와서 선택이 풀린다 — 이것도 의도한 동작이다
                 ui.SetSelectedId(PickObject(scene, camera, (float)mx, (float)my, fbW, fbH));
             }
+        }
+
+        //--- 선택한 오브젝트 삭제 (Delete) ---
+        //아웃라이너 우클릭 메뉴와 같은 일을 하지만, 뷰포트에서 클릭한 손 그대로 지울 수 있게 한다.
+        {
+            const bool deleteDown = glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS;
+
+            //누른 순간에만. 누르고 있는 동안 매 프레임 지우면 씬이 순식간에 비어버린다.
+            //편집 모드에선 Delete가 정점 쪽 키라 오브젝트를 통째로 지우지 않는다 (블렌더와 같다).
+            if (deleteDown && !deleteWasDown && !edit.IsActive() && !ui.WantCaptureKeyboard()
+                && ui.GetSelectedId() != 0)
+            {
+                const unsigned int target = ui.GetSelectedId();
+                if (scene.FindById(target) != nullptr)
+                {
+                    //추가/가져오기와 같은 방식: 앞뒤 목록 차이를 액션으로 남겨 Ctrl+Z로 되살린다
+                    const std::vector<SceneObject> before = scene.GetObjects();
+                    scene.RemoveObject(target);
+                    ui.SetSelectedId(0);
+                    history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 삭제"));
+                    ui.SetImportMessage("오브젝트 삭제", false);
+                }
+            }
+            deleteWasDown = deleteDown;
         }
 
         //--- 되돌리기 / 다시 실행 ---

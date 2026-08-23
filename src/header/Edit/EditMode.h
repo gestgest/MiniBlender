@@ -37,8 +37,10 @@ public:
 
     //화면 좌표에서 가장 가까운 정점을 고른다. 못 찾으면 선택 해제.
     //maxPixelDistance보다 멀면 무시 — 아무 데나 클릭했을 때 엉뚱한 정점이 잡히는 걸 막는다.
+    //X-Ray가 꺼져 있으면 메시에 가려진 정점은 후보에서 빠진다(그래서 카메라 위치가 필요하다).
     void PickAt(float mouseX, float mouseY, int screenW, int screenH,
-        const glm::mat4& viewProj, const glm::mat4& model, float maxPixelDistance = 14.0f);
+        const glm::mat4& viewProj, const glm::mat4& model,
+        const glm::vec3& camWorldPos, float maxPixelDistance = 14.0f);
 
     //선택된 정점을 화면 평면 위에서 끌어 옮긴다 (마우스 픽셀 이동량 기준)
     void DragSelected(float dxPixels, float dyPixels, const OrbitCamera& camera,
@@ -50,6 +52,14 @@ public:
 
     //정점 표시용 VAO. 유니크 위치만 담고 있다.
     unsigned int GetPointVAO() const { return pointVAO; }
+
+    //--- X-Ray (블렌더의 Alt+Z) ---
+    //끄면(기본) 메시에 가려진 정점은 그려지지도, 선택되지도 않는다 — 앞면만 만지게 된다.
+    //켜면 메시를 통과해서 뒤쪽 정점까지 전부 보이고 잡힌다(반대편을 편집할 때).
+    //이 상태는 편집 모드를 드나들어도 유지된다. 사용자가 정한 "보기 방식"이지 편집 대상의 속성이 아니다.
+    bool IsXRay() const { return xray; }
+    void SetXRay(bool on) { xray = on; }
+    void ToggleXRay() { xray = !xray; }
 
     //--- 되돌리기 연동 ---
     //편집 한 덩어리(스트로크)의 시작과 끝.
@@ -66,6 +76,11 @@ public:
 private:
     void ApplyPositionChange();   //용접 그룹 전체에 반영 + 노멀 갱신 + GPU 업로드
 
+    //카메라에서 해당 정점까지 가는 길을 이 메시의 삼각형이 막고 있는가 (전부 로컬 공간).
+    //깊이 버퍼를 되읽는 대신 CPU에서 계산하는 이유: 피킹은 렌더링 "전"에 일어나서
+    //그 시점의 깊이 버퍼는 지난 프레임 것(스왑 후라 내용 보장도 없다)이다.
+    bool IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) const;
+
     bool active = false;
     unsigned int objectId = 0;
     Mesh* targetMesh = nullptr;
@@ -77,6 +92,7 @@ private:
     std::vector<std::vector<unsigned int>> weldGroups;   //각 논리 정점이 묶고 있는 실제 정점 번호들
 
     int selected = -1;
+    bool xray = false;
 
     //스트로크 시작 시점의 정점 사본. 끝날 때 지금 값과 비교해서 바뀐 것만 델타로 남긴다.
     //한 번에 하나만 살아 있어서(드래그 중 하나) 메모리 부담이 없다.

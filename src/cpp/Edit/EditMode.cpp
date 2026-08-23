@@ -6,10 +6,12 @@
 
 #include <glad/glad.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <map>
 #include <tuple>
+#include <utility>
 
 namespace
 {
@@ -172,17 +174,75 @@ void EditMode::UploadPoints()
         uniquePositions.data(), GL_STREAM_DRAW);
 }
 
+bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) const
+{
+    const glm::vec3 dir = uniquePositions[uniqueIndex] - camLocalPos;
+    if (glm::dot(dir, dir) < 1e-12f)
+        return false;   //카메라가 정점 위에 있다. 가릴 것도 없다.
+
+    //광선을 camLocalPos + t*dir 로 두면 목표 정점이 정확히 t == 1 이다.
+    //길이를 정규화하지 않는 게 요점: t가 "정점까지 가는 길의 몇 %"라서
+    //오브젝트 스케일이 얼마든 아래 여유값(epsilon)이 그대로 통한다.
+    const float tNear = 1e-4f;
+    const float tFar = 1.0f - 1e-3f;   //자기가 속한 삼각형(t == 1)이 스스로를 가리지 않게 잘라낸다
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        const glm::vec3& v0 = vertices[indices[i]].position;
+        const glm::vec3& v1 = vertices[indices[i + 1]].position;
+        const glm::vec3& v2 = vertices[indices[i + 2]].position;
+
+        //Möller-Trumbore. 판별식 부호가 곧 앞/뒷면이라, 뒷면을 공짜로 걸러낼 수 있다.
+        const glm::vec3 e1 = v1 - v0;
+        const glm::vec3 e2 = v2 - v0;
+        const glm::vec3 pv = glm::cross(dir, e2);
+        const float det = glm::dot(e1, pv);
+
+        //det <= 0 이면 뒷면이거나 광선과 평행하다.
+        //뒷면을 건너뛰는 이유: 렌더러가 GL_CULL_FACE로 뒷면을 아예 그리지 않으므로,
+        //화면에 없는 면이 정점을 가린다고 판단하면 눈에 보이는 정점이 안 잡힌다.
+        if (det <= 1e-12f)
+            continue;
+
+        const float invDet = 1.0f / det;
+        const glm::vec3 tv = camLocalPos - v0;
+
+        const float u = glm::dot(tv, pv) * invDet;
+        if (u < 0.0f || u > 1.0f)
+            continue;
+
+        const glm::vec3 qv = glm::cross(tv, e1);
+        const float v = glm::dot(dir, qv) * invDet;
+        if (v < 0.0f || u + v > 1.0f)
+            continue;
+
+        const float t = glm::dot(e2, qv) * invDet;
+        if (t > tNear && t < tFar)
+            return true;
+    }
+
+    return false;
+}
+
 void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
-    const glm::mat4& viewProj, const glm::mat4& model, float maxPixelDistance)
+    const glm::mat4& viewProj, const glm::mat4& model,
+    const glm::vec3& camWorldPos, float maxPixelDistance)
 {
     if (!active)
         return;
 
     const glm::mat4 mvp = viewProj * model;
+    const float maxDist2 = maxPixelDistance * maxPixelDistance;
 
-    int best = -1;
-    float bestDist2 = maxPixelDistance * maxPixelDistance;
-    float bestDepth = 2.0f;
+    //후보를 한 번에 하나만 들고 비교하지 않고 전부 모으는 이유:
+    //X-Ray가 꺼져 있으면 "가장 가까운 것"이 가려져 있을 수 있고, 그때 다음 후보로 넘어가야 한다.
+    struct Candidate
+    {
+        float bucket;   //화면 거리를 1픽셀² 단위로 뭉갠 값 (아래 정렬 설명 참고)
+        float depth;
+        size_t index;
+    };
+    std::vector<Candidate> candidates;
 
     for (size_t i = 0; i < uniquePositions.size(); ++i)
     {
@@ -199,16 +259,47 @@ void EditMode::PickAt(float mouseX, float mouseY, int screenW, int screenH,
         const float dy = sy - mouseY;
         const float d2 = dx * dx + dy * dy;
 
-        //화면상 거리가 비슷하면 카메라에 가까운 쪽을 고른다 (겹쳐 보이는 앞뒤 정점 구분)
-        if (d2 < bestDist2 || (std::fabs(d2 - bestDist2) < 1.0f && ndc.z < bestDepth))
+        if (d2 < maxDist2)
+            candidates.push_back({ std::floor(d2), ndc.z, i });
+    }
+
+    if (candidates.empty())
+    {
+        selected = -1;
+        return;
+    }
+
+    //화면 거리가 가까운 순, 거리가 사실상 같으면(1픽셀² 이내) 카메라에 가까운 순.
+    //거리를 floor로 뭉개서 비교하는 건 정렬 규칙을 성립시키기 위해서다 —
+    //"차이가 1 미만이면 같다"로 두면 a==b, b==c인데 a!=c가 되어 std::sort가 깨진다.
+    std::sort(candidates.begin(), candidates.end(),
+        [](const Candidate& a, const Candidate& b)
         {
-            bestDist2 = d2;
-            bestDepth = ndc.z;
-            best = (int)i;
+            return std::make_pair(a.bucket, a.depth) < std::make_pair(b.bucket, b.depth);
+        });
+
+    if (xray)
+    {
+        selected = (int)candidates.front().index;
+        return;
+    }
+
+    //--- X-Ray 꺼짐: 가려진 후보는 건너뛴다 ---
+    //광선 검사는 삼각형 전체를 훑지만(O(삼각형 수)), 후보는 보통 한두 개고
+    //이 함수는 클릭한 프레임에만 돈다. 매 프레임 도는 비용이 아니라 감당할 만하다.
+    const glm::vec3 camLocal = glm::vec3(glm::inverse(model) * glm::vec4(camWorldPos, 1.0f));
+
+    for (const Candidate& c : candidates)
+    {
+        if (!IsOccluded(c.index, camLocal))
+        {
+            selected = (int)c.index;
+            return;
         }
     }
 
-    selected = best;
+    //전부 가려져 있다 = 지금 각도에서 만질 수 있는 정점이 없다. 선택을 푸는 게 정직하다.
+    selected = -1;
 }
 
 void EditMode::DragSelected(float dxPixels, float dyPixels, const OrbitCamera& camera,
