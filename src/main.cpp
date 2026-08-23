@@ -11,6 +11,7 @@
 
 #include <Config.h>
 #include <Edit/EditMode.h>
+#include <Edit/History.h>
 #include <Loader/FbxExporter.h>
 #include <Loader/ObjExporter.h>
 #include <Loader/SceneImport.h>
@@ -214,6 +215,8 @@ int main(int argc, char** argv)
     EditMode edit;
     edit.Init();
 
+    History history;
+
     EditorUI ui;
     ui.Init(window);
 
@@ -223,6 +226,8 @@ int main(int argc, char** argv)
 
     bool tabWasDown = false;
     bool leftWasDown = false;
+    bool undoWasDown = false;
+    bool redoWasDown = false;
 
     double lastTitleUpdate = glfwGetTime();
 
@@ -293,16 +298,63 @@ int main(int argc, char** argv)
 
                 //누르는 순간에만 선택. 누른 채 움직이면 드래그로 넘어간다.
                 if (leftDown && !leftWasDown)
+                {
                     edit.PickAt((float)mx, (float)my, fbW, fbH, viewProj, model);
+                    //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
+                    edit.BeginStroke();
+                }
                 else if (leftDown && (dx != 0.0f || dy != 0.0f))
+                {
                     edit.DragSelected(dx, dy, camera, fbH, model);
+                }
+                else if (!leftDown && leftWasDown)
+                {
+                    edit.CommitStroke(history, "정점 이동");
+                }
 
                 leftWasDown = leftDown;
             }
             else
             {
+                //패널 위로 커서가 넘어가거나 편집 모드를 나가도 끌던 건 마무리해야 한다.
+                //안 그러면 기록이 열린 채 남아서 다음 스트로크에 통째로 섞인다.
+                if (leftWasDown)
+                    edit.CommitStroke(history, "정점 이동");
                 leftWasDown = false;
             }
+        }
+
+        //--- 되돌리기 / 다시 실행 ---
+        //ImGui가 키보드를 잡고 있으면(입력창에 커서가 있으면) 건드리지 않는다.
+        //경로를 타이핑하다 Ctrl+Z를 누르면 글자가 지워져야지 씬이 되돌아가면 안 된다.
+        {
+            const bool ctrlDown = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS
+                || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            const bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+                || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+
+            //Ctrl+Shift+Z와 Ctrl+Y 둘 다 다시 실행으로 받는다 (앱마다 관례가 갈려서)
+            const bool undoDown = ctrlDown && !shiftHeld && glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS;
+            const bool redoDown = ctrlDown && ((shiftHeld && glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
+                || glfwGetKey(window, GLFW_KEY_Y) == GLFW_PRESS);
+
+            //키를 누르고 있는 동안 매 프레임 되돌아가면 스택이 순식간에 비어버린다. 눌린 순간에만.
+            const bool undoPressed = (undoDown && !undoWasDown && !ui.WantCaptureKeyboard())
+                || ui.ConsumeUndoRequest();
+            const bool redoPressed = (redoDown && !redoWasDown && !ui.WantCaptureKeyboard())
+                || ui.ConsumeRedoRequest();
+
+            undoWasDown = undoDown;
+            redoWasDown = redoDown;
+
+            if (undoPressed && history.Undo(scene, edit))
+                ui.SetImportMessage("되돌리기", false);
+            else if (redoPressed && history.Redo(scene, edit))
+                ui.SetImportMessage("다시 실행", false);
+
+            //되돌리기로 오브젝트가 사라졌으면 선택도 풀어준다
+            if (ui.GetSelectedId() != 0 && scene.FindById(ui.GetSelectedId()) == nullptr)
+                ui.SetSelectedId(0);
         }
 
         //--- 파일 불러오기 요청 처리 ---
@@ -314,9 +366,16 @@ int main(int argc, char** argv)
 
             for (const std::string& file : g_droppedFiles)
             {
+                //가져오기는 예시 큐브를 치우면서 오브젝트를 여럿 추가한다.
+                //앞뒤 목록을 비교하면 그 둘이 한 액션으로 묶여서, Ctrl+Z 한 번이면 통째로 물러난다.
+                const std::vector<SceneObject> beforeImport = scene.GetObjects();
+
                 const ImportReport report = ImportFbxIntoScene(scene, camera, file);
                 ui.SetImportMessage(report.message, !report.ok);
                 std::cout << (report.ok ? "[가져오기] " : "[가져오기 실패] ") << report.message << std::endl;
+
+                if (report.ok)
+                    history.Push(History::MakeSceneDiff(beforeImport, scene.GetObjects(), "가져오기"));
             }
             g_droppedFiles.clear();
 
@@ -350,7 +409,7 @@ int main(int argc, char** argv)
         if (!bench.ShouldSkipUI())
         {
             ui.BeginFrame();
-            ui.Draw(scene, renderer, camera, stats, edit);
+            ui.Draw(scene, renderer, camera, stats, edit, history);
             ui.EndFrame();
 
             //파일 대화상자는 모달이라 떠 있는 동안 이 루프가 통째로 멈춘다.

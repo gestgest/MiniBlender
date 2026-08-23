@@ -144,6 +144,7 @@
     <ClCompile Include="src\glad.c" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\cpp\Edit\EditMode.cpp" />
+    <ClCompile Include="src\cpp\Edit\History.cpp" />
     <ClCompile Include="src\cpp\Loader\FbxExporter.cpp" />
     <ClCompile Include="src\cpp\Loader\FbxLoader.cpp" />
     <ClCompile Include="src\cpp\Loader\ObjExporter.cpp" />
@@ -170,6 +171,7 @@
     <ClInclude Include="include\header\shader.h" />
     <ClInclude Include="src\header\Config.h" />
     <ClInclude Include="src\header\Edit\EditMode.h" />
+    <ClInclude Include="src\header\Edit\History.h" />
     <ClInclude Include="src\header\Loader\FbxExporter.h" />
     <ClInclude Include="src\header\Loader\FbxLoader.h" />
     <ClInclude Include="src\header\Loader\ObjExporter.h" />

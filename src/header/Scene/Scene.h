@@ -27,6 +27,10 @@ public:
         const glm::vec3& position = glm::vec3(0.0f));
 
     void RemoveObject(unsigned int id);
+
+    //되돌리기 전용: 지웠던 오브젝트를 원래 id와 원래 자리 그대로 되살린다.
+    //AddObject를 쓰면 새 id가 붙어서, 그 id를 참조하던 선택 상태와 이후 액션들이 전부 어긋난다.
+    void InsertObject(const SceneObject& obj, size_t index);
     //예시용 오브젝트를 모두 제거한다. 반환값은 지운 개수
     int RemovePlaceholders();
     SceneObject* FindById(unsigned int id);

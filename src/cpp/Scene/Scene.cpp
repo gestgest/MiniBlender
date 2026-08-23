@@ -1,6 +1,7 @@
 #include <Scene/Scene.h>
 
 #include <algorithm>
+#include <cstddef>
 
 void Scene::InitDefaultMeshes()
 {
@@ -76,6 +77,18 @@ void Scene::RemoveObject(unsigned int id)
         std::remove_if(objects.begin(), objects.end(),
             [id](const SceneObject& o) { return o.id == id; }),
         objects.end());
+}
+
+void Scene::InsertObject(const SceneObject& obj, size_t index)
+{
+    if (index > objects.size())
+        index = objects.size();
+
+    objects.insert(objects.begin() + (std::ptrdiff_t)index, obj);
+
+    //되살린 id를 그대로 쓰므로, 다음에 새로 만들 id가 겹치지 않게 밀어둔다
+    if (obj.id >= nextId)
+        nextId = obj.id + 1;
 }
 
 int Scene::RemovePlaceholders()

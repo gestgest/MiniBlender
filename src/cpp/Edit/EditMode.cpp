@@ -1,5 +1,6 @@
 #include <Edit/EditMode.h>
 
+#include <Edit/History.h>
 #include <Render/OrbitCamera.h>
 #include <Scene/Scene.h>
 
@@ -81,6 +82,67 @@ bool EditMode::Enter(Scene& scene, unsigned int id)
     return true;
 }
 
+void EditMode::BeginStroke()
+{
+    strokeOpen = false;
+    if (!active)
+        return;
+
+    strokeBefore = vertices;
+    strokeOpen = true;
+}
+
+void EditMode::CommitStroke(History& history, const std::string& label)
+{
+    if (!strokeOpen)
+        return;
+
+    strokeOpen = false;
+
+    //스트로크 도중에 편집 대상이 바뀌었으면(다른 오브젝트로 갈아탐) 비교 자체가 성립하지 않는다
+    if (!active || targetMesh == nullptr || strokeBefore.size() != vertices.size())
+    {
+        strokeBefore.clear();
+        return;
+    }
+
+    Action action;
+    action.label = label;
+    action.mesh = targetMesh;
+
+    for (unsigned int i = 0; i < (unsigned int)vertices.size(); ++i)
+    {
+        if (strokeBefore[i].position == vertices[i].position
+            && strokeBefore[i].normal == vertices[i].normal)
+            continue;
+
+        VertexDelta delta;
+        delta.index = i;
+        delta.oldPosition = strokeBefore[i].position;
+        delta.oldNormal = strokeBefore[i].normal;
+        delta.newPosition = vertices[i].position;
+        delta.newNormal = vertices[i].normal;
+        action.vertexDeltas.push_back(delta);
+    }
+
+    strokeBefore.clear();
+    history.Push(std::move(action));   //바뀐 게 없으면 Push가 알아서 무시한다
+}
+
+void EditMode::RefreshIfEditing(Scene& scene, const Mesh* changedMesh)
+{
+    if (!active || targetMesh != changedMesh)
+        return;
+
+    const unsigned int id = objectId;
+    const int keepSelected = selected;
+
+    //Enter가 GPU에서 다시 읽어 용접 그룹까지 새로 만든다.
+    //정점 위치만 바뀌고 개수는 그대로라 그룹 구성도 같으니, 선택은 그대로 살려둔다.
+    if (Enter(scene, id) && keepSelected >= 0 && keepSelected < (int)uniquePositions.size())
+        selected = keepSelected;
+}
+
 void EditMode::Exit()
 {
     active = false;
@@ -91,6 +153,11 @@ void EditMode::Exit()
     indices.clear();
     uniquePositions.clear();
     weldGroups.clear();
+
+    //기록 중이던 스트로크는 버린다. Enter가 Exit을 먼저 부르기 때문에
+    //RefreshIfEditing 도중에도 여기를 지나는데, 그때 남은 사본은 이미 쓸모가 없다.
+    strokeBefore.clear();
+    strokeOpen = false;
 }
 
 void EditMode::UploadPoints()

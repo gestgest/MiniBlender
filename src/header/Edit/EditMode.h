@@ -4,10 +4,12 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
 #include <vector>
 
 class Scene;
 class OrbitCamera;
+class History;
 
 //정점 편집 모드 (블렌더의 Edit Mode에 해당).
 //
@@ -49,6 +51,18 @@ public:
     //정점 표시용 VAO. 유니크 위치만 담고 있다.
     unsigned int GetPointVAO() const { return pointVAO; }
 
+    //--- 되돌리기 연동 ---
+    //편집 한 덩어리(스트로크)의 시작과 끝.
+    //드래그는 마우스를 누른 채 프레임마다 조금씩 움직이는 거라, 그대로 기록하면
+    //Ctrl+Z를 서른 번 눌러야 원위치가 된다. 누른 순간부터 뗀 순간까지를 하나로 묶는다.
+    void BeginStroke();
+    //바뀐 정점이 하나도 없으면 아무것도 쌓지 않는다 (정점을 고르기만 하고 안 옮긴 경우).
+    void CommitStroke(History& history, const std::string& label);
+
+    //되돌리기가 이 메시를 건드렸다면 CPU 사본을 다시 읽어온다.
+    //안 그러면 화면의 점과 실제 메시가 어긋난 채로 다음 편집이 엉뚱한 값 위에 얹힌다.
+    void RefreshIfEditing(Scene& scene, const Mesh* changedMesh);
+
 private:
     void ApplyPositionChange();   //용접 그룹 전체에 반영 + 노멀 갱신 + GPU 업로드
 
@@ -63,6 +77,11 @@ private:
     std::vector<std::vector<unsigned int>> weldGroups;   //각 논리 정점이 묶고 있는 실제 정점 번호들
 
     int selected = -1;
+
+    //스트로크 시작 시점의 정점 사본. 끝날 때 지금 값과 비교해서 바뀐 것만 델타로 남긴다.
+    //한 번에 하나만 살아 있어서(드래그 중 하나) 메모리 부담이 없다.
+    std::vector<Vertex> strokeBefore;
+    bool strokeOpen = false;
 
     //점 렌더링용 버퍼 (유니크 위치만)
     unsigned int pointVAO = 0;

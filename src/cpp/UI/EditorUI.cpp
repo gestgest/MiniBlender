@@ -6,6 +6,7 @@
 #include <Render/OrbitCamera.h>
 #include <Render/Renderer.h>
 #include <Edit/EditMode.h>
+#include <Edit/History.h>
 #include <Scene/Scene.h>
 
 #include <imgui/imgui.h>
@@ -77,12 +78,12 @@ bool EditorUI::WantCaptureKeyboard() const
 }
 
 void EditorUI::Draw(Scene& scene, Renderer& renderer, OrbitCamera& camera, const FrameStats& stats,
-    EditMode& edit)
+    EditMode& edit, History& history)
 {
     DrawStatsPanel(stats, renderer);
     DrawFilePanel();
-    DrawOutliner(scene);
-    DrawInspector(scene, camera, edit);
+    DrawOutliner(scene, history);
+    DrawInspector(scene, camera, edit, history);
 }
 
 bool EditorUI::ConsumeLoadRequest(std::string& outPath)
@@ -110,6 +111,20 @@ bool EditorUI::ConsumeDialogStall()
     const bool stalled = dialogStalled;
     dialogStalled = false;
     return stalled;
+}
+
+bool EditorUI::ConsumeUndoRequest()
+{
+    const bool requested = pendingUndo;
+    pendingUndo = false;
+    return requested;
+}
+
+bool EditorUI::ConsumeRedoRequest()
+{
+    const bool requested = pendingRedo;
+    pendingRedo = false;
+    return requested;
 }
 
 void EditorUI::SetImportMessage(const std::string& msg, bool isError)
@@ -274,13 +289,32 @@ void EditorUI::DrawStatsPanel(const FrameStats& stats, Renderer& renderer)
     ImGui::End();
 }
 
-void EditorUI::DrawOutliner(Scene& scene)
+void EditorUI::DrawOutliner(Scene& scene, History& history)
 {
     ImGui::SetNextWindowPos(ImVec2(10, 360), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(300, 260), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("아웃라이너"))
     {
+        //--- 되돌리기 ---
+        //단축키(Ctrl+Z)가 본체지만, 버튼이 있어야 "무엇이" 되돌아가는지 보인다.
+        ImGui::BeginDisabled(!history.CanUndo());
+        if (ImGui::Button("되돌리기"))
+            pendingUndo = true;
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered() && history.CanUndo())
+            ImGui::SetTooltip("Ctrl+Z — %s", history.UndoLabel());
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!history.CanRedo());
+        if (ImGui::Button("다시 실행"))
+            pendingRedo = true;
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered() && history.CanRedo())
+            ImGui::SetTooltip("Ctrl+Y — %s", history.RedoLabel());
+
+        ImGui::Separator();
+
         //--- 오브젝트 추가 ---
         if (ImGui::BeginCombo("추가", "프리미티브 선택..."))
         {
@@ -288,8 +322,12 @@ void EditorUI::DrawOutliner(Scene& scene)
             {
                 if (ImGui::Selectable(meshName.c_str()))
                 {
+                    //씬 목록을 앞뒤로 떠서 비교한다. 추가/삭제마다 기록 코드를 따로 쓰지 않아도
+                    //되돌리기가 따라붙고, 복사는 클릭한 순간 한 번뿐이라 비용도 없다.
+                    const std::vector<SceneObject> before = scene.GetObjects();
                     SceneObject* obj = scene.AddObject(meshName, meshName);
                     selectedId = obj->id;
+                    history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 추가"));
                 }
             }
             ImGui::EndCombo();
@@ -298,6 +336,8 @@ void EditorUI::DrawOutliner(Scene& scene)
         //드로우콜 부하 테스트용. 이걸 눌러서 숫자가 어떻게 변하는지 보는 게 이 프로젝트의 재미.
         if (ImGui::Button("큐브 100개 추가"))
         {
+            const std::vector<SceneObject> before = scene.GetObjects();
+
             int side = 10;
             for (int i = 0; i < 100; ++i)
             {
@@ -305,6 +345,9 @@ void EditorUI::DrawOutliner(Scene& scene)
                 float z = (float)(i / side) * 1.5f - side * 0.75f;
                 scene.AddObject("Cube", "Cube", glm::vec3(x, 0.5f, z));
             }
+
+            //100개가 액션 하나다. 한 번 눌러 만든 걸 되돌릴 때 100번 누르게 할 순 없다.
+            history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "큐브 100개 추가"));
         }
 
         ImGui::Separator();
@@ -335,15 +378,17 @@ void EditorUI::DrawOutliner(Scene& scene)
         //순회 중에 지우면 반복자가 깨지니 루프가 끝난 뒤에 지운다
         if (toDelete != 0)
         {
+            const std::vector<SceneObject> before = scene.GetObjects();
             scene.RemoveObject(toDelete);
             if (selectedId == toDelete)
                 selectedId = 0;
+            history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 삭제"));
         }
     }
     ImGui::End();
 }
 
-void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit)
+void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit, History& history)
 {
     ImGui::SetNextWindowPos(ImVec2(10, 630), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(300, 220), ImGuiCond_FirstUseEver);
@@ -362,11 +407,41 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit)
                 ImGui::TextDisabled("메시: %s (삼각형 %u)", obj->mesh->GetName().c_str(), obj->mesh->GetTriangleCount());
 
             ImGui::Separator();
+
+            //위젯 하나가 끝날 때마다 이걸 부른다.
+            //잡은 순간(Activated)의 상태를 떠 두고, 놓은 순간(DeactivatedAfterEdit)에 한 번만 기록한다.
+            //슬라이더를 끄는 내내 기록하면 되돌리기 스택이 수십 칸씩 쌓여서 쓸모가 없어진다.
+            auto trackPropertyEdit = [&](const char* label)
+            {
+                if (ImGui::IsItemActivated())
+                {
+                    propertyBefore = *obj;
+                    propertyEditing = true;
+                }
+
+                if (ImGui::IsItemDeactivatedAfterEdit() && propertyEditing
+                    && propertyBefore.id == obj->id)
+                {
+                    Action action;
+                    action.label = label;
+                    action.hasChange = true;
+                    action.before = propertyBefore;
+                    action.after = *obj;
+                    history.Push(std::move(action));
+                    propertyEditing = false;
+                }
+            };
+
             ImGui::DragFloat3("위치", &obj->transform.position.x, 0.02f);
+            trackPropertyEdit("위치 변경");
             ImGui::DragFloat3("회전", &obj->transform.rotation.x, 0.5f);
+            trackPropertyEdit("회전 변경");
             ImGui::DragFloat3("크기", &obj->transform.scale.x, 0.02f, 0.01f, 100.0f);
+            trackPropertyEdit("크기 변경");
             ImGui::ColorEdit3("색", &obj->color.x);
+            trackPropertyEdit("색 변경");
             ImGui::Checkbox("표시", &obj->visible);
+            trackPropertyEdit("표시 전환");
 
             ImGui::Separator();
             if (ImGui::Button("이 오브젝트로 시점 이동"))
@@ -398,8 +473,15 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit)
 
                     //숫자로도 편집할 수 있게 (드래그는 화면 평면 위로만 움직이니 정밀 조정용)
                     glm::vec3 pos = edit.GetSelectedPosition();
-                    if (ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f))
+                    const bool moved = ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f);
+
+                    //BeginStroke가 값을 적용하기 "전"에 와야 편집 전 상태가 잡힌다
+                    if (ImGui::IsItemActivated())
+                        edit.BeginStroke();
+                    if (moved)
                         edit.SetSelectedPosition(pos);
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                        edit.CommitStroke(history, "정점 이동");
                 }
             }
         }
