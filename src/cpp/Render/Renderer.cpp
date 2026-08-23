@@ -13,6 +13,9 @@
 void Renderer::Init()
 {
     objectShader = new Shader("src/vs/basic.vs", "src/fs/basic.fs");
+    //프래그먼트 셰이더는 같은 것을 쓴다 — 바뀌는 건 "정점을 어떻게 배치하는가"뿐이라
+    //픽셀을 칠하는 비용은 두 경로가 완전히 동일하다. 비교할 때 이게 중요하다.
+    instancedShader = new Shader("src/vs/basic_instanced.vs", "src/fs/basic.fs");
     gridShader = new Shader("src/vs/grid.vs", "src/fs/grid.fs");
     pointShader = new Shader("src/vs/point.vs", "src/fs/point.fs");
 
@@ -22,6 +25,7 @@ void Renderer::Init()
 void Renderer::Shutdown()
 {
     delete objectShader; objectShader = nullptr;
+    delete instancedShader; instancedShader = nullptr;
     delete gridShader;   gridShader = nullptr;
     delete pointShader;  pointShader = nullptr;
 
@@ -29,6 +33,13 @@ void Renderer::Shutdown()
     {
         glDeleteVertexArrays(1, &emptyVAO);
         emptyVAO = 0;
+    }
+
+    if (instanceVBO != 0)
+    {
+        glDeleteBuffers(1, &instanceVBO);
+        instanceVBO = 0;
+        instanceBufferBytes = 0;
     }
 }
 
@@ -49,26 +60,16 @@ void Renderer::RenderScene(Scene& scene, const OrbitCamera& camera, int width, i
     glm::mat4 viewProj = proj * view;
 
     //--- 1패스: 불투명 오브젝트 ---
-    //지금은 오브젝트 하나에 드로우콜 하나 = 가장 순진한 방식.
-    //이게 기준선(baseline)이고, 앞으로 이 숫자를 어떻게 줄이는지가 이 프로젝트의 본론.
-    objectShader->use();
-    objectShader->setMat4("view", view);
-    objectShader->setMat4("projection", proj);
-    objectShader->setVec3("lightDir", glm::normalize(lightDirection));
+    Shader* shader = useInstancing ? instancedShader : objectShader;
+    shader->use();
+    shader->setMat4("view", view);
+    shader->setMat4("projection", proj);
+    shader->setVec3("lightDir", glm::normalize(lightDirection));
 
-    for (const SceneObject& obj : scene.GetObjects())
-    {
-        if (!obj.visible || obj.mesh == nullptr)
-            continue;
-
-        objectShader->setMat4("model", obj.transform.GetMatrix());
-        objectShader->setVec3("objectColor", obj.color);
-
-        glBindVertexArray(obj.mesh->GetVAO());
-        glDrawElements(GL_TRIANGLES, obj.mesh->GetIndexCount(), GL_UNSIGNED_INT, nullptr);
-
-        stats.AddDrawCall(obj.mesh->GetTriangleCount());
-    }
+    if (useInstancing)
+        DrawObjectsInstanced(scene, stats);
+    else
+        DrawObjectsNaive(scene, stats);
 
     //--- 2패스: 무한 그리드 ---
     //반투명이라 불투명 오브젝트를 다 그린 뒤에 그린다.
@@ -98,6 +99,100 @@ void Renderer::RenderScene(Scene& scene, const OrbitCamera& camera, int width, i
     }
 
     glBindVertexArray(0);
+}
+
+void Renderer::DrawObjectsNaive(Scene& scene, FrameStats& stats)
+{
+    //오브젝트 하나에 드로우콜 하나 = 가장 순진한 방식. 이게 기준선(baseline)이다.
+    //오브젝트마다 uniform 두 개를 밀어넣고 VAO를 다시 바인딩하는데,
+    //큐브 10000개면 이 세 줄이 10000번 반복된다 — 그리는 삼각형은 12개뿐인데도.
+    for (const SceneObject& obj : scene.GetObjects())
+    {
+        if (!obj.visible || obj.mesh == nullptr)
+            continue;
+
+        objectShader->setMat4("model", obj.transform.GetMatrix());
+        objectShader->setVec3("objectColor", obj.color);
+
+        glBindVertexArray(obj.mesh->GetVAO());
+        glDrawElements(GL_TRIANGLES, obj.mesh->GetIndexCount(), GL_UNSIGNED_INT, nullptr);
+
+        stats.AddDrawCall(obj.mesh->GetTriangleCount());
+    }
+}
+
+void Renderer::DrawObjectsInstanced(Scene& scene, FrameStats& stats)
+{
+    //1) 같은 메시를 쓰는 오브젝트끼리 모은다.
+    //   Scene이 처음부터 메시를 포인터로 공유하게 돼 있어서(오브젝트 1000개 = 메시 1개),
+    //   포인터 비교만으로 묶인다. 메시 종류는 보통 한 자릿수라 선형 탐색으로 충분하다.
+    instanceGroups.clear();
+    instanceScratch.clear();
+
+    for (const SceneObject& obj : scene.GetObjects())
+    {
+        if (!obj.visible || obj.mesh == nullptr)
+            continue;
+
+        InstanceGroup* group = nullptr;
+        for (InstanceGroup& candidate : instanceGroups)
+        {
+            if (candidate.mesh == obj.mesh) { group = &candidate; break; }
+        }
+
+        if (group == nullptr)
+        {
+            instanceGroups.push_back(InstanceGroup{ obj.mesh, instanceScratch.size(), 0 });
+            group = &instanceGroups.back();
+        }
+
+        //묶음이 버퍼 안에서 이어져 있어야 오프셋 하나로 그릴 수 있다.
+        //섞인 순서로 들어오면 아래 삽입이 O(n)이 되지만, 실제로는 같은 메시가 연달아 들어오는 게
+        //대부분이라(가져온 모델 하나 = 메시 하나) 뒤에 붙이는 경로만 타게 된다.
+        const InstanceData data{ obj.transform.GetMatrix(), obj.color, 0.0f };
+        instanceScratch.insert(instanceScratch.begin() + (group->first + group->count), data);
+        ++group->count;
+
+        //내 뒤에 있던 묶음들은 한 칸씩 밀렸다
+        for (InstanceGroup& other : instanceGroups)
+        {
+            if (other.first > group->first)
+                ++other.first;
+        }
+    }
+
+    if (instanceScratch.empty())
+        return;
+
+    //2) 전부 한 버퍼에 통째로 올린다. 묶음마다 따로 올리면 업로드 횟수가 메시 종류만큼 늘어난다.
+    if (instanceVBO == 0)
+        glCreateBuffers(1, &instanceVBO);
+
+    const size_t bytes = instanceScratch.size() * sizeof(InstanceData);
+    if (bytes > instanceBufferBytes)
+    {
+        //필요한 만큼만 잡으면 오브젝트가 하나 늘 때마다 재할당이 일어난다. 여유를 두고 잡는다.
+        instanceBufferBytes = bytes + bytes / 2;
+        glNamedBufferData(instanceVBO, (GLsizeiptr)instanceBufferBytes, nullptr, GL_STREAM_DRAW);
+    }
+    glNamedBufferSubData(instanceVBO, 0, (GLsizeiptr)bytes, instanceScratch.data());
+
+    //3) 메시 하나당 드로우콜 하나.
+    for (const InstanceGroup& group : instanceGroups)
+    {
+        if (group.count == 0)
+            continue;
+
+        group.mesh->BindInstanceBuffer(instanceVBO, group.first * sizeof(InstanceData));
+
+        glBindVertexArray(group.mesh->GetVAO());
+        glDrawElementsInstanced(GL_TRIANGLES, group.mesh->GetIndexCount(),
+            GL_UNSIGNED_INT, nullptr, (GLsizei)group.count);
+
+        //삼각형 수는 인스턴스 수만큼 곱해서 센다 — GPU가 실제로 처리하는 양은 그대로다.
+        //줄어드는 건 "그려라"라고 말하는 횟수뿐이라는 게 이 표에서 바로 보여야 한다.
+        stats.AddDrawCall(group.mesh->GetTriangleCount() * (unsigned int)group.count);
+    }
 }
 
 void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,

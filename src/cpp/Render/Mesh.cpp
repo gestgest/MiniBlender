@@ -26,6 +26,7 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept
         ebo = other.ebo;
         indexCount = other.indexCount;
         vertexCount = other.vertexCount;
+        instanceAttribsReady = other.instanceAttribsReady;
         name = std::move(other.name);
         boundsMin = other.boundsMin;
         boundsMax = other.boundsMax;
@@ -34,6 +35,7 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept
         other.vao = other.vbo = other.ebo = 0;
         other.indexCount = 0;
         other.vertexCount = 0;
+        other.instanceAttribsReady = false;
     }
     return *this;
 }
@@ -45,6 +47,7 @@ void Mesh::Release()
     if (ebo != 0) { glDeleteBuffers(1, &ebo); ebo = 0; }
     indexCount = 0;
     vertexCount = 0;
+    instanceAttribsReady = false;   //VAO를 지웠으니 형식 설정도 없던 일이 된다
 }
 
 void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
@@ -80,6 +83,42 @@ void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigne
     glVertexArrayAttribBinding(vao, 1, 0);
 
     RecomputeBounds(vertices);
+}
+
+void Mesh::BindInstanceBuffer(unsigned int instanceVBO, size_t byteOffset)
+{
+    if (vao == 0 || instanceVBO == 0)
+        return;
+
+    if (!instanceAttribsReady)
+    {
+        //mat4는 attribute 하나에 안 들어간다 — GL의 attribute 한 칸은 vec4가 최대라
+        //열 4개를 location 2,3,4,5에 나눠 싣는다. 셰이더에서 `in mat4`로 받으면 알아서 다시 합쳐진다.
+        for (unsigned int col = 0; col < 4; ++col)
+        {
+            const unsigned int loc = 2 + col;
+            glEnableVertexArrayAttrib(vao, loc);
+            glVertexArrayAttribFormat(vao, loc, 4, GL_FLOAT, GL_FALSE,
+                (GLuint)(offsetof(InstanceData, model) + col * sizeof(glm::vec4)));
+            glVertexArrayAttribBinding(vao, loc, 1);
+        }
+
+        //attribute 6 = 인스턴스 색
+        glEnableVertexArrayAttrib(vao, 6);
+        glVertexArrayAttribFormat(vao, 6, 3, GL_FLOAT, GL_FALSE, (GLuint)offsetof(InstanceData, color));
+        glVertexArrayAttribBinding(vao, 6, 1);
+
+        //이 한 줄이 인스턴싱의 스위치다.
+        //바인딩 슬롯 1에서 읽는 attribute는 "정점마다"가 아니라 "인스턴스 1개마다" 한 칸씩 전진한다.
+        //슬롯 단위로 거는 것(glVertexArrayBindingDivisor)이라 attribute 5개에 한 번만 걸면 된다.
+        glVertexArrayBindingDivisor(vao, 1, 1);
+
+        instanceAttribsReady = true;
+    }
+
+    //메시별 인스턴스 묶음은 한 버퍼 안에 이어 붙여 두고, 시작 오프셋만 바꿔가며 그린다.
+    //(glDrawElementsInstancedBaseInstance로도 되지만, 이쪽이 드로우 인자에 상태를 안 섞어서 읽기 쉽다)
+    glVertexArrayVertexBuffer(vao, 1, instanceVBO, (GLintptr)byteOffset, sizeof(InstanceData));
 }
 
 void Mesh::UpdateVertices(const std::vector<Vertex>& vertices)

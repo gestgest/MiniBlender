@@ -298,6 +298,15 @@ void EditorUI::DrawStatsPanel(const FrameStats& stats, Renderer& renderer)
             0.0f, 8.0f, ImVec2(0, 45));
 
         ImGui::Separator();
+
+        //이 체크박스가 이 프로젝트의 본론이다. 끄면 오브젝트 하나당 드로우콜 하나를 내는
+        //원래 경로로 돌아가서, 위의 드로우콜/CPU 숫자가 어떻게 달라지는지 바로 보인다.
+        ImGui::Checkbox("인스턴싱", &renderer.useInstancing);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("같은 메시를 쓰는 오브젝트를 모아 드로우콜 하나로 그린다.\n"
+                              "삼각형 수는 그대로고 드로우콜만 줄어든다.\n"
+                              "vsync 때문에 여기서는 CPU 값이 잘 안 움직인다 - 측정 모드에서 볼 것.");
+
         ImGui::Checkbox("그리드 표시", &renderer.showGrid);
         ImGui::ColorEdit3("배경", &renderer.backgroundColor.x);
         ImGui::DragFloat3("광원 방향", &renderer.lightDirection.x, 0.01f, -1.0f, 1.0f);

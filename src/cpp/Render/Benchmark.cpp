@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -34,7 +35,7 @@ void Benchmark::ParseArgs(int argc, char** argv)
     long n = std::strtol(argv[1], &end, 10);
     if (end == argv[1] || n < 0)
     {
-        std::cout << "사용법: MiniBlender.exe <개수> [메시이름] [워밍업프레임] [샘플프레임]\n"
+        std::cout << "사용법: MiniBlender.exe <개수> [메시이름] [워밍업프레임] [샘플프레임] [--no-instancing]\n"
                   << "  메시이름: Cube(기본) | Plane | Sphere | Cylinder | HiSphere\n";
         return;
     }
@@ -42,9 +43,20 @@ void Benchmark::ParseArgs(int argc, char** argv)
     active = true;
     count = (int)n;
 
-    if (argc > 2) meshName = argv[2];
-    if (argc > 3) warmupFrames = std::atoi(argv[3]);
-    if (argc > 4) sampleFrames = std::atoi(argv[4]);
+    //플래그는 위치를 안 가리고 먼저 걷어낸다. 위치 인자로 만들면
+    //"메시 이름은 기본값을 쓰고 플래그만 주고 싶다"가 안 되기 때문이다.
+    std::vector<char*> positional;
+    for (int i = 2; i < argc; ++i)
+    {
+        if (std::strcmp(argv[i], "--no-instancing") == 0)
+            useInstancing = false;
+        else
+            positional.push_back(argv[i]);
+    }
+
+    if (positional.size() > 0) meshName = positional[0];
+    if (positional.size() > 1) warmupFrames = std::atoi(positional[1]);
+    if (positional.size() > 2) sampleFrames = std::atoi(positional[2]);
 
     if (sampleFrames < 1) sampleFrames = 1;
     if (warmupFrames < 0) warmupFrames = 0;
@@ -91,7 +103,8 @@ bool Benchmark::Init(GLFWwindow* window, Scene& scene, OrbitCamera& camera)
     }
 
     std::cout << "[벤치] " << meshName << " x" << count
-              << " (워밍업 " << warmupFrames << "프레임, 샘플 " << sampleFrames << "프레임)\n";
+              << " (인스턴싱 " << (useInstancing ? "켬" : "끔")
+              << ", 워밍업 " << warmupFrames << "프레임, 샘플 " << sampleFrames << "프레임)\n";
     return true;
 }
 
@@ -119,6 +132,7 @@ bool Benchmark::Tick(const FrameStats& stats)
     std::cout << "RESULT"
               << " mesh=" << meshName
               << " n=" << count
+              << " inst=" << (useInstancing ? "on" : "off")
               << " calls=" << stats.GetDrawCalls()
               << " tris=" << stats.GetTriangles()
               << " cpu=" << cpu

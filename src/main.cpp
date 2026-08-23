@@ -213,6 +213,10 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    //측정 모드에서만 인스턴싱을 끌 수 있다(--no-instancing). 평소 모드는 항상 켠 채로 시작하고,
+    //필요하면 통계 패널의 체크박스로 끈다.
+    renderer.useInstancing = bench.UseInstancing();
+
     EditMode edit;
     edit.Init();
 

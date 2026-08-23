@@ -11,6 +11,20 @@ struct Vertex
     glm::vec3 normal;
 };
 
+//인스턴스 하나가 갖는 데이터 = "이 메시를 어디에 어떤 색으로 그릴 것인가".
+//
+//정점 데이터와 같은 VBO 방식으로 GPU에 올라가지만 읽는 속도가 다르다:
+//  position/normal은 "정점마다" 다음 칸으로 넘어가고 (divisor 0),
+//  이건 "인스턴스마다" 넘어간다 (divisor 1).
+//즉 큐브의 정점 24개를 그리는 동안 model은 고정이고, 다음 큐브로 넘어갈 때 한 칸 전진한다.
+//uniform으로 매번 밀어넣던 값을 버퍼에 미리 다 쌓아두는 것 — 이게 인스턴싱의 전부다.
+struct InstanceData
+{
+    glm::mat4 model;
+    glm::vec3 color;
+    float _pad = 0.0f;   //stride를 16의 배수로 맞춰둔다 (나중에 UBO/SSBO로 옮길 때 그대로 쓰려고)
+};
+
 //GPU에 올라간 메시 하나. VAO/VBO/EBO를 소유한다.
 //
 //인덱스 버퍼를 쓰는 이유: 큐브를 36개 버텍스로 그리면 같은 꼭짓점이 여러 번 중복된다.
@@ -42,6 +56,14 @@ public:
     //내용 수정이 아예 거부된다 (GL_INVALID_OPERATION).
     void UpdateVertices(const std::vector<Vertex>& vertices);
 
+    //인스턴스 버퍼를 이 VAO의 바인딩 슬롯 1에 연결한다 (오프셋은 바이트 단위).
+    //VAO마다 한 번만 attribute 형식을 잡아두고, 이후엔 "어느 버퍼의 어디부터 읽을지"만 바꾼다.
+    //
+    //형식 설정을 Upload에서 미리 안 하고 여기서 늦게 하는 이유:
+    //  attribute를 켜두면 GL은 바인딩 슬롯에 버퍼가 없어도 거기서 값을 읽으려 든다(정의되지 않은 동작).
+    //  인스턴싱을 안 쓰는 경로에서는 아예 켜지 않는 게 안전하다.
+    void BindInstanceBuffer(unsigned int instanceVBO, size_t byteOffset);
+
     //로컬 공간 경계 상자. 클릭 피킹의 1차 걸러내기에 쓴다.
     //Upload/UpdateVertices에서 같이 계산해 두는 이유: 정점은 이미 손에 있는데
     //나중에 필요할 때 GPU에서 되읽어 다시 훑으면 순전히 낭비다.
@@ -63,6 +85,7 @@ private:
     unsigned int ebo = 0;
     unsigned int indexCount = 0;
     unsigned int vertexCount = 0;
+    bool instanceAttribsReady = false;   //인스턴스 attribute 형식을 잡아둔 VAO인지
     std::string name = "Mesh";
 
     //빈 메시면 원점의 점 하나로 남는다. 광선이 거기를 스칠 수는 있지만
