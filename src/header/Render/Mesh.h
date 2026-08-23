@@ -42,6 +42,12 @@ public:
     //내용 수정이 아예 거부된다 (GL_INVALID_OPERATION).
     void UpdateVertices(const std::vector<Vertex>& vertices);
 
+    //로컬 공간 경계 상자. 클릭 피킹의 1차 걸러내기에 쓴다.
+    //Upload/UpdateVertices에서 같이 계산해 두는 이유: 정점은 이미 손에 있는데
+    //나중에 필요할 때 GPU에서 되읽어 다시 훑으면 순전히 낭비다.
+    const glm::vec3& GetBoundsMin() const { return boundsMin; }
+    const glm::vec3& GetBoundsMax() const { return boundsMax; }
+
     unsigned int GetVAO() const { return vao; }
     unsigned int GetIndexCount() const { return indexCount; }
     unsigned int GetVertexCount() const { return vertexCount; }
@@ -50,12 +56,19 @@ public:
     void SetName(const std::string& n) { name = n; }
 
 private:
+    void RecomputeBounds(const std::vector<Vertex>& vertices);
+
     unsigned int vao = 0;
     unsigned int vbo = 0;
     unsigned int ebo = 0;
     unsigned int indexCount = 0;
     unsigned int vertexCount = 0;
     std::string name = "Mesh";
+
+    //빈 메시면 원점의 점 하나로 남는다. 광선이 거기를 스칠 수는 있지만
+    //삼각형이 없어서 피킹 2단계에서 어차피 걸러진다.
+    glm::vec3 boundsMin{ 0.0f };
+    glm::vec3 boundsMax{ 0.0f };
 };
 
 //프리미티브 생성기. 블렌더의 Add > Mesh 메뉴에 해당하는 것들.

@@ -27,6 +27,8 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept
         indexCount = other.indexCount;
         vertexCount = other.vertexCount;
         name = std::move(other.name);
+        boundsMin = other.boundsMin;
+        boundsMax = other.boundsMax;
 
         //원본은 빈 껍데기로 만들어야 소멸자에서 남의 버퍼를 지우지 않는다
         other.vao = other.vbo = other.ebo = 0;
@@ -76,6 +78,8 @@ void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigne
     glEnableVertexArrayAttrib(vao, 1);
     glVertexArrayAttribFormat(vao, 1, 3, GL_FLOAT, GL_FALSE, offsetof(Vertex, normal));
     glVertexArrayAttribBinding(vao, 1, 0);
+
+    RecomputeBounds(vertices);
 }
 
 void Mesh::UpdateVertices(const std::vector<Vertex>& vertices)
@@ -84,6 +88,10 @@ void Mesh::UpdateVertices(const std::vector<Vertex>& vertices)
         return;
 
     glNamedBufferSubData(vbo, 0, (GLsizeiptr)(vertices.size() * sizeof(Vertex)), vertices.data());
+
+    //정점을 옮겼으면 경계 상자도 따라 움직여야 한다.
+    //안 그러면 편집한 정점이 상자 밖으로 나가서 그 부분을 클릭해도 안 잡힌다.
+    RecomputeBounds(vertices);
 }
 
 bool Mesh::ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>& outIndices) const
@@ -97,6 +105,24 @@ bool Mesh::ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>&
     glGetNamedBufferSubData(vbo, 0, (GLsizeiptr)(vertexCount * sizeof(Vertex)), outVertices.data());
     glGetNamedBufferSubData(ebo, 0, (GLsizeiptr)(indexCount * sizeof(unsigned int)), outIndices.data());
     return true;
+}
+
+void Mesh::RecomputeBounds(const std::vector<Vertex>& vertices)
+{
+    if (vertices.empty())
+    {
+        boundsMin = glm::vec3(0.0f);
+        boundsMax = glm::vec3(0.0f);
+        return;
+    }
+
+    boundsMin = vertices[0].position;
+    boundsMax = vertices[0].position;
+    for (const Vertex& v : vertices)
+    {
+        boundsMin = glm::min(boundsMin, v.position);
+        boundsMax = glm::max(boundsMax, v.position);
+    }
 }
 
 namespace Primitives

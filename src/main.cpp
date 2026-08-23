@@ -19,6 +19,7 @@
 #include <Render/FrameStats.h>
 #include <Render/OrbitCamera.h>
 #include <Render/Renderer.h>
+#include <Scene/Picking.h>
 #include <Scene/Scene.h>
 #include <UI/EditorUI.h>
 
@@ -226,6 +227,7 @@ int main(int argc, char** argv)
 
     bool tabWasDown = false;
     bool leftWasDown = false;
+    bool pickWasDown = false;
     bool undoWasDown = false;
     bool redoWasDown = false;
 
@@ -321,6 +323,24 @@ int main(int argc, char** argv)
                 if (leftWasDown)
                     edit.CommitStroke(history, "정점 이동");
                 leftWasDown = false;
+            }
+        }
+
+        //--- 뷰포트에서 오브젝트 선택 ---
+        //아웃라이너에서만 고를 수 있으면 모델을 눈앞에 두고도 목록에서 이름을 찾아야 한다.
+        {
+            const bool pickDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            const bool pickClicked = pickDown && !pickWasDown;
+            pickWasDown = pickDown;
+
+            //편집 모드에선 좌클릭이 정점 선택이라 손대지 않는다 (블렌더도 같다).
+            if (pickClicked && !edit.IsActive() && !ui.WantCaptureMouse())
+            {
+                int fbW = 0, fbH = 0;
+                glfwGetFramebufferSize(window, &fbW, &fbH);
+
+                //빈 곳을 누르면 0이 돌아와서 선택이 풀린다 — 이것도 의도한 동작이다
+                ui.SetSelectedId(PickObject(scene, camera, (float)mx, (float)my, fbW, fbH));
             }
         }
 
