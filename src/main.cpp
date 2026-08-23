@@ -243,7 +243,7 @@ int main(int argc, char** argv)
         glfwPollEvents();
         stats.BeginFrame();
 
-        //--- 카메라 조작 (블렌더 방식) ---
+        //--- 카메라 조작 ---
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
         float dx = (float)(mx - lastMouseX);
@@ -254,17 +254,16 @@ int main(int argc, char** argv)
         //ImGui 패널 위에서는 뷰포트 조작을 막는다. 안 그러면 슬라이더 드래그에 카메라가 따라 돈다.
         if (!ui.WantCaptureMouse())
         {
-            bool middleDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
-            bool shiftDown = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
-                || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+            //마우스 관련 입력
+            const bool orbitDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+            const bool panDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
 
-            if (middleDown)
-            {
-                if (shiftDown)
-                    camera.Pan(dx, dy);
-                else
-                    camera.Orbit(dx, dy);
-            }
+            //둘이 동시에 눌렸으면 팬을 우선한다. 한 프레임에 둘 다 적용하면
+            //회전과 이동이 겹쳐서 화면이 튄다.
+            if (panDown)
+                camera.Pan(dx, dy);
+            else if (orbitDown)
+                camera.Orbit(dx, dy);
 
             if (g_scrollDelta != 0.0f)
                 camera.Zoom(g_scrollDelta);
@@ -299,7 +298,6 @@ int main(int argc, char** argv)
                 const glm::mat4 model = target ? target->transform.GetMatrix() : glm::mat4(1.0f);
                 const float aspect = (fbH > 0) ? (float)fbW / (float)fbH : 1.0f;
                 const glm::mat4 viewProj = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
-                const glm::vec3 camPos = camera.GetPosition();
 
                 const bool leftDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
                 const bool shiftDown = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
@@ -312,7 +310,7 @@ int main(int argc, char** argv)
                 if (leftDown && !leftWasDown)
                 {
                     const int hit = edit.PickVertexAt((float)mx, (float)my, fbW, fbH,
-                        viewProj, model, camPos);
+                        viewProj, model, camera);
 
                     if (hit >= 0)
                     {
@@ -349,7 +347,7 @@ int main(int argc, char** argv)
                     }
                     else
                     {
-                        edit.EndBoxSelect(fbW, fbH, viewProj, model, camPos, shiftDown);
+                        edit.EndBoxSelect(fbW, fbH, viewProj, model, camera, shiftDown);
                     }
                 }
 

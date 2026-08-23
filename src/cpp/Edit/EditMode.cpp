@@ -90,19 +90,6 @@ bool EditMode::Enter(Scene& scene, unsigned int id)
         }
     }
 
-    //용접 그룹의 노멀을 평균 내 둔다. 박스 선택에서 "카메라를 등진 정점"을 쳐낼 때 쓴다.
-    //면마다 노멀이 달라서 한 자리에 여러 개가 겹쳐 있는데, 그 평균이 그 자리의 바깥 방향이다.
-    uniqueNormals.assign(uniquePositions.size(), glm::vec3(0.0f));
-    for (size_t u = 0; u < weldGroups.size(); ++u)
-    {
-        glm::vec3 sum(0.0f);
-        for (unsigned int vi : weldGroups[u])
-            sum += vertices[vi].normal;
-
-        //길이가 0이면(정확히 반대인 노멀들이 상쇄) 방향을 알 수 없다. 0으로 두면 뒤에서 판정을 건너뛴다.
-        uniqueNormals[u] = (glm::dot(sum, sum) > 1e-12f) ? glm::normalize(sum) : glm::vec3(0.0f);
-    }
-
     selectedFlags.assign(uniquePositions.size(), 0);
     selectedCount = 0;
     activeVertex = -1;
@@ -191,7 +178,6 @@ void EditMode::Exit()
     vertices.clear();
     indices.clear();
     uniquePositions.clear();
-    uniqueNormals.clear();
     weldGroups.clear();
 
     selectedFlags.clear();
@@ -292,7 +278,29 @@ void EditMode::ToggleSelection(int index)
     UploadSelectedPoints();
 }
 
-bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) const
+float EditMode::OcclusionTFar(size_t uniqueIndex, const glm::mat4& model,
+    const OrbitCamera& camera, float worldBias) const
+{
+    const glm::vec3 camPos = camera.GetPosition();
+    const glm::vec3 forward = glm::normalize(camera.GetTarget() - camPos);
+    const glm::vec3 worldVertex = glm::vec3(model * glm::vec4(uniquePositions[uniqueIndex], 1.0f));
+
+    //그리는 쪽은 점을 "뷰 축 방향 깊이"에서 띄운다 — 깊이 버퍼가 재는 게 그 값이기 때문이다.
+    //그래서 여기서도 카메라까지의 직선거리가 아니라 뷰 축에 투영한 깊이로 나눠야
+    //화면 한가운데든 가장자리든 두 기준이 정확히 같아진다.
+    //(직선거리를 쓰면 가장자리로 갈수록 코사인만큼 어긋나서, 화면 구석의 정점이
+    // 그려지는데도 안 잡히는 일이 생긴다)
+    const float viewDepth = glm::dot(worldVertex - camPos, forward);
+    if (viewDepth < 1e-6f)
+        return 0.0f;
+
+    //t는 "카메라에서 정점까지 가는 길의 몇 %"다. 띄우는 양을 그 길의 깊이로 나누면
+    //같은 단위가 된다. 이 지점보다 앞에서 막혀야 비로소 "가려졌다".
+    const float t = 1.0f - worldBias / viewDepth;
+    return (t < 0.0f) ? 0.0f : t;
+}
+
+bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos, float tFar) const
 {
     const glm::vec3 dir = uniquePositions[uniqueIndex] - camLocalPos;
     if (glm::dot(dir, dir) < 1e-12f)
@@ -302,7 +310,8 @@ bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) cons
     //길이를 정규화하지 않는 게 요점: t가 "정점까지 가는 길의 몇 %"라서
     //오브젝트 스케일이 얼마든 아래 여유값(epsilon)이 그대로 통한다.
     const float tNear = 1e-4f;
-    const float tFar = 1.0f - 1e-3f;   //자기가 속한 삼각형(t == 1)이 스스로를 가리지 않게 잘라낸다
+    //tFar는 부르는 쪽이 SurfaceBias로 계산해 넘긴다. 자기가 속한 삼각형은 t == 1에서
+    //만나므로 그보다 앞에서 잘리고, 그 여유폭이 그리는 쪽이 점을 띄우는 양과 같다.
 
     for (size_t i = 0; i + 2 < indices.size(); i += 3)
     {
@@ -342,18 +351,9 @@ bool EditMode::IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) cons
     return false;
 }
 
-bool EditMode::IsBackFacing(size_t uniqueIndex, const glm::vec3& camLocalPos) const
-{
-    const glm::vec3& n = uniqueNormals[uniqueIndex];
-    if (glm::dot(n, n) < 1e-12f)
-        return false;   //방향을 모르면 가려졌다고 단정하지 않는다
-
-    return glm::dot(n, camLocalPos - uniquePositions[uniqueIndex]) <= 0.0f;
-}
-
 int EditMode::PickVertexAt(float mouseX, float mouseY, int screenW, int screenH,
     const glm::mat4& viewProj, const glm::mat4& model,
-    const glm::vec3& camWorldPos, float maxPixelDistance) const
+    const OrbitCamera& camera, float maxPixelDistance) const
 {
     if (!active)
         return -1;
@@ -408,11 +408,12 @@ int EditMode::PickVertexAt(float mouseX, float mouseY, int screenW, int screenH,
     //--- X-Ray 꺼짐: 가려진 후보는 건너뛴다 ---
     //광선 검사는 삼각형 전체를 훑지만(O(삼각형 수)), 후보는 보통 한두 개고
     //이 함수는 클릭한 프레임에만 돈다. 매 프레임 도는 비용이 아니라 감당할 만하다.
-    const glm::vec3 camLocal = glm::vec3(glm::inverse(model) * glm::vec4(camWorldPos, 1.0f));
+    const glm::vec3 camLocal = glm::vec3(glm::inverse(model) * glm::vec4(camera.GetPosition(), 1.0f));
+    const float bias = SurfaceBias(camera.GetDistance());
 
     for (const Candidate& c : candidates)
     {
-        if (!IsOccluded(c.index, camLocal))
+        if (!IsOccluded(c.index, camLocal, OcclusionTFar(c.index, model, camera, bias)))
             return (int)c.index;
     }
 
@@ -456,7 +457,7 @@ void EditMode::GetBoxRect(float& outMinX, float& outMinY, float& outMaxX, float&
 }
 
 void EditMode::EndBoxSelect(int screenW, int screenH, const glm::mat4& viewProj,
-    const glm::mat4& model, const glm::vec3& camWorldPos, bool additive)
+    const glm::mat4& model, const OrbitCamera& camera, bool additive)
 {
     if (!boxSelecting)
         return;
@@ -506,43 +507,37 @@ void EditMode::EndBoxSelect(int screenW, int screenH, const glm::mat4& viewProj,
 
     if (!xray && !inside.empty())
     {
-        //X-Ray가 꺼져 있으면 가려진 정점은 빼야 하는데, 여기선 후보가 수천 개까지 간다.
-        //정확한 광선 검사는 후보당 삼각형 전체를 훑어서 (후보 x 삼각형) 만큼 든다 —
-        //큰 메시를 통째로 감싸면 마우스를 놓는 순간 몇 초씩 멈출 수 있다.
+        //--- 가려진 정점 걸러내기 ---
+        //원칙: "화면에 그려진 정점은 반드시 선택된다." 애매하면 넣는 쪽으로 기운다.
+        //안 보이는 게 딸려오는 건 눈에 띄면 지우면 그만이지만,
+        //보이는데 안 잡히는 건 사용자가 원인을 알 수 없어서 훨씬 나쁘다.
         //
-        //그래서 두 단계로 간다:
-        //  1) 카메라를 등진 정점을 노멀로 먼저 쳐낸다 (공짜, 보통 절반이 날아간다)
-        //  2) 남은 게 예산 안이면 정확한 광선 검사까지, 넘으면 1번 결과로 만족한다
-        //볼록한 모양에선 1번만으로도 정확하고, 오목한 부분에서만 조금 후하게 잡힌다.
-        const glm::vec3 camLocal = glm::vec3(glm::inverse(model) * glm::vec4(camWorldPos, 1.0f));
-
-        std::vector<size_t> facing;
-        facing.reserve(inside.size());
-        for (size_t i : inside)
-        {
-            if (!IsBackFacing(i, camLocal))
-                facing.push_back(i);
-        }
-
-        //광선 검사 예산. 요즘 CPU가 한 프레임(16ms)에 소화할 만한 규모로 잡았다.
-        const size_t RAY_BUDGET = 4000000;
+        //(예전엔 여기서 평균 노멀로 "카메라를 등진 정점"을 먼저 쳐냈는데, 그게 딱
+        // 그 반대로 동작했다 — 실루엣 위의 정점은 노멀이 시선과 거의 수직이라
+        // 제일 잘 보이는데도 뒷면으로 판정돼 통째로 빠졌다. 근사를 걷어냈다.)
         const size_t triangles = indices.size() / 3;
 
-        if (triangles > 0 && facing.size() * triangles <= RAY_BUDGET)
+        //광선 검사는 후보 하나당 삼각형 전체를 훑는다. 큰 메시를 통째로 감싸면
+        //마우스를 놓는 순간 몇 초씩 멈출 수 있어서 예산을 둔다.
+        const size_t RAY_BUDGET = 4000000;
+
+        if (triangles > 0 && inside.size() * triangles <= RAY_BUDGET)
         {
+            const glm::vec3 camLocal =
+                glm::vec3(glm::inverse(model) * glm::vec4(camera.GetPosition(), 1.0f));
+            const float bias = SurfaceBias(camera.GetDistance());
+
             std::vector<size_t> visible;
-            visible.reserve(facing.size());
-            for (size_t i : facing)
+            visible.reserve(inside.size());
+            for (size_t i : inside)
             {
-                if (!IsOccluded(i, camLocal))
+                if (!IsOccluded(i, camLocal, OcclusionTFar(i, model, camera, bias)))
                     visible.push_back(i);
             }
             inside.swap(visible);
         }
-        else
-        {
-            inside.swap(facing);
-        }
+        //예산을 넘으면 사각형 안을 전부 선택한다. 정확도를 싸구려 근사로 바꾸는 대신
+        //X-Ray를 켠 것처럼 후하게 잡는 쪽을 고른다 — 위의 원칙과 같은 이유다.
     }
 
     for (size_t i : inside)

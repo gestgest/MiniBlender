@@ -53,7 +53,7 @@ public:
     //X-Ray가 꺼져 있으면 메시에 가려진 정점은 후보에서 빠진다(그래서 카메라 위치가 필요하다).
     int PickVertexAt(float mouseX, float mouseY, int screenW, int screenH,
         const glm::mat4& viewProj, const glm::mat4& model,
-        const glm::vec3& camWorldPos, float maxPixelDistance = 14.0f) const;
+        const OrbitCamera& camera, float maxPixelDistance = 14.0f) const;
 
     //--- 박스(러버밴드) 선택 ---
     //빈 곳에서 시작한 드래그는 사각형이 되고, 놓는 순간 그 안의 정점이 전부 선택된다.
@@ -68,7 +68,7 @@ public:
     //드래그를 놓는 순간. additive(Shift)면 기존 선택에 더하고, 아니면 갈아치운다.
     //사각형이 몇 픽셀도 안 되면 "그냥 빈 곳 클릭"으로 보고 선택을 푼다.
     void EndBoxSelect(int screenW, int screenH, const glm::mat4& viewProj,
-        const glm::mat4& model, const glm::vec3& camWorldPos, bool additive);
+        const glm::mat4& model, const OrbitCamera& camera, bool additive);
 
     //선택된 정점 "전부"를 화면 평면 위에서 끌어 옮긴다 (마우스 픽셀 이동량 기준)
     void DragSelected(float dxPixels, float dyPixels, const OrbitCamera& camera,
@@ -82,6 +82,18 @@ public:
     unsigned int GetPointVAO() const { return pointVAO; }
     //선택된 정점만 따로 담은 VAO. 강조해서 덧그리는 용도라 버퍼를 나눠 뒀다.
     unsigned int GetSelectedVAO() const { return selectedVAO; }
+
+    //정점 점을 자기가 얹힌 면보다 얼마나 앞으로 띄울 것인가 (뷰 공간 = 월드 단위).
+    //
+    //이 값이 왜 공용이어야 하는가:
+    //  정점은 면 위에 정확히 얹혀 있어서, 그냥 두면 깊이가 같아 z-파이팅으로 깜빡인다.
+    //  그래서 그릴 때 카메라 쪽으로 살짝 당긴다. 그런데 "가려졌나?"를 판정하는 피킹이
+    //  다른 여유값을 쓰면 두 기준이 어긋난다 — 화면엔 그려지는데 클릭은 안 먹는 정점이 생긴다.
+    //  둘 다 여기를 거치게 해서 어긋날 수가 없게 만든다.
+    //
+    //카메라 거리에 비례시키는 이유: 모델이 0.01이든 1000이든 화면에서 차지하는 크기는
+    //비슷하게 맞춰 보게 되므로, 여유값도 화면 기준으로 일정해야 한다.
+    static float SurfaceBias(float cameraDistance) { return cameraDistance * 0.004f; }
 
     //--- X-Ray (블렌더의 Alt+Z) ---
     //끄면(기본) 메시에 가려진 정점은 그려지지도, 선택되지도 않는다 — 앞면만 만지게 된다.
@@ -109,11 +121,15 @@ private:
     //카메라에서 해당 정점까지 가는 길을 이 메시의 삼각형이 막고 있는가 (전부 로컬 공간).
     //깊이 버퍼를 되읽는 대신 CPU에서 계산하는 이유: 피킹은 렌더링 "전"에 일어나서
     //그 시점의 깊이 버퍼는 지난 프레임 것(스왑 후라 내용 보장도 없다)이다.
-    bool IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos) const;
+    //tFar는 "이 지점보다 앞에서 막히면 가려진 것으로 본다"는 경계다(광선 길이의 비율).
+    //정점 자신이 속한 삼각형은 t == 1에서 만나므로 반드시 1보다 작아야 하고,
+    //그 여유폭이 곧 SurfaceBias — 그리는 쪽이 띄우는 양과 같아야 한다.
+    bool IsOccluded(size_t uniqueIndex, const glm::vec3& camLocalPos, float tFar) const;
 
-    //정점이 카메라 반대쪽을 보고 있는가. 가림 판정의 싸구려 근사판 —
-    //박스 선택은 후보가 수천 개까지 가서 정확한 광선 검사를 다 돌릴 수 없을 때가 있다.
-    bool IsBackFacing(size_t uniqueIndex, const glm::vec3& camLocalPos) const;
+    //정점 하나에 대한 tFar를 구한다. 월드 기준 여유값을 그 정점까지의 실제 거리로 나눠
+    //광선 파라미터(t) 단위로 바꾸는 일 — 오브젝트에 스케일이 걸려 있어도 맞게 나온다.
+    float OcclusionTFar(size_t uniqueIndex, const glm::mat4& model,
+        const OrbitCamera& camera, float worldBias) const;
 
     void SetSelectedFlag(size_t index, bool on);
 
@@ -125,7 +141,6 @@ private:
     std::vector<unsigned int> indices;
 
     std::vector<glm::vec3> uniquePositions;              //논리적 정점 = 화면에 점으로 보이는 것
-    std::vector<glm::vec3> uniqueNormals;                //용접 그룹의 평균 노멀 (앞/뒤 판정용)
     std::vector<std::vector<unsigned int>> weldGroups;   //각 논리 정점이 묶고 있는 실제 정점 번호들
 
     //uniquePositions와 같은 길이. vector<bool>을 안 쓰는 이유는 비트 특수화 때문 —

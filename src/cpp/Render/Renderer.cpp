@@ -142,7 +142,9 @@ void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
         glDepthMask(GL_FALSE);
-        pointShader->setFloat("depthNudge", camera.GetDistance() * 0.004f);
+        //피킹의 가림 판정과 반드시 같은 값이어야 한다. 어긋나면 화면엔 보이는데
+        //클릭은 안 먹는 정점이 생긴다 — 그래서 상수를 EditMode 한 군데에 두고 같이 쓴다.
+        pointShader->setFloat("depthNudge", EditMode::SurfaceBias(camera.GetDistance()));
     }
 
     //1) 전체 정점
