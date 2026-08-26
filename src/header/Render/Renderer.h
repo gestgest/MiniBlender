@@ -2,6 +2,7 @@
 
 #include <Render/FrameStats.h>
 #include <Render/Mesh.h>
+#include <Render/Gizmo.h>
 
 #include <glm/glm.hpp>
 
@@ -25,6 +26,10 @@ public:
 
     //편집 모드일 때 정점을 점으로 덧그린다. 씬 패스 뒤에 별도 패스로 나가므로 드로우콜 1개가 추가된다.
     void RenderEditPoints(const class EditMode& edit, const Scene& scene,
+        const OrbitCamera& camera, int width, int height, FrameStats& stats);
+
+    //선택된 정점이 있을 때 이동 기즈모(X/Y/Z 화살표)를 덧그린다.
+    void RenderGizmo(const class EditMode& edit, const Scene& scene,
         const OrbitCamera& camera, int width, int height, FrameStats& stats);
 
     //그리드 on/off (UI에서 토글)
@@ -67,6 +72,12 @@ private:
     Shader* instancedShader = nullptr;
     Shader* gridShader = nullptr;
     Shader* pointShader = nullptr;
+    Shader* gizmoShader = nullptr;
+
+    //이동 기즈모 지오메트리. 매 프레임 위치/크기/강조색이 바뀔 수 있어 내용을 다시 올린다.
+    Gizmo gizmo;
+    std::vector<GizmoVertex> gizmoLineScratch;
+    std::vector<GizmoVertex> gizmoTriScratch;
 
     //그리드는 버텍스 데이터가 없지만 VAO는 반드시 하나 바인딩돼 있어야 한다 (core 프로파일 규칙).
     //그래서 텅 빈 VAO를 하나 만들어 둔다.

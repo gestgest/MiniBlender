@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Render/Mesh.h>
+#include <Render/GizmoAxis.h>
 
 #include <glm/glm.hpp>
 
@@ -73,6 +74,40 @@ public:
     //선택된 정점 "전부"를 화면 평면 위에서 끌어 옮긴다 (마우스 픽셀 이동량 기준)
     void DragSelected(float dxPixels, float dyPixels, const OrbitCamera& camera,
         int screenH, const glm::mat4& model);
+
+    //--- 이동 기즈모 (유니티/블렌더 스타일 X/Y/Z 화살표) ---
+    //선택된 정점이 있을 때만 기즈모가 나타난다. 원점은 선택된 정점들의 중심(월드 공간),
+    //팔 길이는 카메라와의 거리에 비례시켜 화면에서 항상 비슷한 크기로 보이게 한다.
+    //Renderer가 화살표를 그릴 위치를 알아야 하고, EditMode가 그 위치로 피킹/드래그를
+    //계산해야 하니 이 계산 하나를 공용으로 둔다 — 둘이 각자 계산하면 언젠가 어긋난다.
+    bool GetGizmoPlacement(const glm::mat4& model, const OrbitCamera& camera,
+        glm::vec3& outWorldOrigin, float& outArmLength) const;
+
+    //화면 좌표에서 가장 가까운 축 화살표를 찾는다. 선택된 정점이 없으면 항상 None.
+    GizmoAxis PickGizmoAxis(float mouseX, float mouseY, int screenW, int screenH,
+        const glm::mat4& viewProj, const glm::mat4& model, const OrbitCamera& camera,
+        float maxPixelDistance = 10.0f) const;
+
+    //드래그 중인 축(마우스를 누르고 있는 동안). 렌더러가 이 축을 더 밝게 그린다.
+    GizmoAxis GetActiveGizmoAxis() const { return activeGizmoAxis; }
+    void BeginAxisDrag(GizmoAxis axis) { activeGizmoAxis = axis; }
+    void EndAxisDrag() { activeGizmoAxis = GizmoAxis::None; }
+
+    //마우스가 올라가 있는 축(누르지 않은 상태). 드래그 중이 아닐 때의 강조 표시용.
+    GizmoAxis GetHoverGizmoAxis() const { return hoverGizmoAxis; }
+    void SetHoverGizmoAxis(GizmoAxis axis) { hoverGizmoAxis = axis; }
+    //렌더러가 실제로 밝게 그릴 축 — 드래그 중이면 그 축이 우선한다.
+    GizmoAxis GetHighlightedGizmoAxis() const
+    {
+        return activeGizmoAxis != GizmoAxis::None ? activeGizmoAxis : hoverGizmoAxis;
+    }
+
+    //선택된 정점 전부를 지정한 축(월드 공간) 방향으로만 옮긴다.
+    //화면 평면 드래그(DragSelected)와 달리, 축의 화면상 방향/길이를 구해 마우스 이동을
+    //그 방향에 투영한 성분만 반영한다 — 그래서 축과 나란히 움직이지 않으면 값이 거의 안 바뀐다.
+    void DragSelectedAlongAxis(GizmoAxis axis, float dxPixels, float dyPixels,
+        const OrbitCamera& camera, int screenW, int screenH,
+        const glm::mat4& model, const glm::mat4& viewProj);
 
     //활성 정점의 위치를 직접 지정 (속성 패널에서 숫자로 편집)
     void SetSelectedPosition(const glm::vec3& localPos);
@@ -150,6 +185,10 @@ private:
     int activeVertex = -1;
 
     bool xray = false;
+
+    //이동 기즈모 상태
+    GizmoAxis activeGizmoAxis = GizmoAxis::None;   //마우스를 누르고 끄는 중인 축
+    GizmoAxis hoverGizmoAxis = GizmoAxis::None;    //누르지 않고 올려만 둔 축 (강조 표시용)
 
     bool boxSelecting = false;
     float boxStartX = 0.0f, boxStartY = 0.0f;

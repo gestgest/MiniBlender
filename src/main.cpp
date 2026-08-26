@@ -313,31 +313,51 @@ int main(int argc, char** argv)
                 //블렌더와 같은 구분이고, 둘 다 좌클릭 드래그라 이 판단이 없으면 서로를 잡아먹는다.
                 if (leftDown && !leftWasDown)
                 {
-                    const int hit = edit.PickVertexAt((float)mx, (float)my, fbW, fbH,
+                    //기즈모 화살표가 먼저다 — 선택된 정점 위에 화살표가 겹쳐 있을 때
+                    //"축으로만 옮기기"를 누른 것으로 봐야지, 정점을 다시 고르는 걸로 보면 안 된다.
+                    const GizmoAxis axisHit = edit.PickGizmoAxis((float)mx, (float)my, fbW, fbH,
                         viewProj, model, camera);
 
-                    if (hit >= 0)
+                    if (axisHit != GizmoAxis::None)
                     {
-                        if (shiftDown)
-                            edit.ToggleSelection(hit);
-                        else if (!edit.IsSelected(hit))
-                            edit.SelectOnly(hit);
-                        //이미 선택된 정점을 다시 누른 경우는 선택을 건드리지 않는다.
-                        //여럿 골라놓고 그중 하나를 잡아 통째로 끌 수 있어야 하니까.
-
-                        //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
                         edit.BeginStroke();
-                        vertexDragging = edit.GetSelectedCount() > 0;
+                        edit.BeginAxisDrag(axisHit);
+                        vertexDragging = true;
                     }
                     else
                     {
-                        vertexDragging = false;
-                        edit.BeginBoxSelect((float)mx, (float)my);
+                        const int hit = edit.PickVertexAt((float)mx, (float)my, fbW, fbH,
+                            viewProj, model, camera);
+
+                        if (hit >= 0)
+                        {
+                            if (shiftDown)
+                                edit.ToggleSelection(hit);
+                            else if (!edit.IsSelected(hit))
+                                edit.SelectOnly(hit);
+                            //이미 선택된 정점을 다시 누른 경우는 선택을 건드리지 않는다.
+                            //여럿 골라놓고 그중 하나를 잡아 통째로 끌 수 있어야 하니까.
+
+                            //누른 순간부터 뗄 때까지가 되돌리기 한 칸이다
+                            edit.BeginStroke();
+                            vertexDragging = edit.GetSelectedCount() > 0;
+                        }
+                        else
+                        {
+                            vertexDragging = false;
+                            edit.BeginBoxSelect((float)mx, (float)my);
+                        }
                     }
                 }
                 else if (leftDown)
                 {
-                    if (vertexDragging && (dx != 0.0f || dy != 0.0f))
+                    if (edit.GetActiveGizmoAxis() != GizmoAxis::None)
+                    {
+                        if (dx != 0.0f || dy != 0.0f)
+                            edit.DragSelectedAlongAxis(edit.GetActiveGizmoAxis(), dx, dy,
+                                camera, fbW, fbH, model, viewProj);
+                    }
+                    else if (vertexDragging && (dx != 0.0f || dy != 0.0f))
                         edit.DragSelected(dx, dy, camera, fbH, model);
                     else if (edit.IsBoxSelecting())
                         edit.UpdateBoxSelect((float)mx, (float)my);
@@ -346,13 +366,22 @@ int main(int argc, char** argv)
                 {
                     if (vertexDragging)
                     {
-                        edit.CommitStroke(history, "정점 이동");
+                        edit.CommitStroke(history,
+                            edit.GetActiveGizmoAxis() != GizmoAxis::None ? "축 이동" : "정점 이동");
+                        edit.EndAxisDrag();
                         vertexDragging = false;
                     }
                     else
                     {
                         edit.EndBoxSelect(fbW, fbH, viewProj, model, camera, shiftDown);
                     }
+                }
+                else
+                {
+                    //마우스를 누르지 않고 움직이기만 할 때 — 화살표 위에 올라가면 밝게 강조해서
+                    //"여길 잡으면 그 축으로만 움직인다"는 걸 누르기 전에 알려준다.
+                    edit.SetHoverGizmoAxis(edit.PickGizmoAxis((float)mx, (float)my, fbW, fbH,
+                        viewProj, model, camera));
                 }
 
                 leftWasDown = leftDown;
@@ -362,7 +391,12 @@ int main(int argc, char** argv)
                 //패널 위로 커서가 넘어가거나 편집 모드를 나가도 끌던 건 마무리해야 한다.
                 //안 그러면 기록이 열린 채 남아서 다음 스트로크에 통째로 섞인다.
                 if (leftWasDown && vertexDragging)
-                    edit.CommitStroke(history, "정점 이동");
+                {
+                    edit.CommitStroke(history,
+                        edit.GetActiveGizmoAxis() != GizmoAxis::None ? "축 이동" : "정점 이동");
+                }
+                edit.EndAxisDrag();
+                edit.SetHoverGizmoAxis(GizmoAxis::None);
 
                 //그리다 만 선택 사각형은 그냥 버린다. 커서가 패널로 빠진 시점의
                 //사각형으로 선택을 바꾸면 사용자가 의도하지 않은 범위가 잡힌다.
@@ -512,6 +546,7 @@ int main(int argc, char** argv)
 
         renderer.RenderScene(scene, camera, fbWidth, fbHeight, stats);
         renderer.RenderEditPoints(edit, scene, camera, fbWidth, fbHeight, stats);
+        renderer.RenderGizmo(edit, scene, camera, fbWidth, fbHeight, stats);
 
         //--- UI ---
         if (!bench.ShouldSkipUI())

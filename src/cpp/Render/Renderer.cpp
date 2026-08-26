@@ -18,8 +18,10 @@ void Renderer::Init()
     instancedShader = new Shader("src/vs/basic_instanced.vs", "src/fs/basic.fs");
     gridShader = new Shader("src/vs/grid.vs", "src/fs/grid.fs");
     pointShader = new Shader("src/vs/point.vs", "src/fs/point.fs");
+    gizmoShader = new Shader("src/vs/gizmo.vs", "src/fs/gizmo.fs");
 
     glCreateVertexArrays(1, &emptyVAO);
+    gizmo.Init();
 }
 
 void Renderer::Shutdown()
@@ -28,6 +30,8 @@ void Renderer::Shutdown()
     delete instancedShader; instancedShader = nullptr;
     delete gridShader;   gridShader = nullptr;
     delete pointShader;  pointShader = nullptr;
+    delete gizmoShader;  gizmoShader = nullptr;
+    gizmo.Shutdown();
 
     if (emptyVAO != 0)
     {
@@ -273,4 +277,59 @@ void Renderer::RenderEditPoints(const EditMode& edit, const Scene& scene,
     glDepthFunc(GL_LESS);
     glEnable(GL_DEPTH_TEST);
     glBindVertexArray(0);
+}
+
+void Renderer::RenderGizmo(const EditMode& edit, const Scene& scene,
+    const OrbitCamera& camera, int width, int height, FrameStats& stats)
+{
+    if (!edit.IsActive() || edit.GetSelectedCount() <= 0)
+        return;
+
+    const SceneObject* obj = nullptr;
+    for (const SceneObject& o : scene.GetObjects())
+    {
+        if (o.id == edit.GetObjectId()) { obj = &o; break; }
+    }
+    if (obj == nullptr)
+        return;
+
+    const glm::mat4 model = obj->transform.GetMatrix();
+
+    glm::vec3 worldOrigin;
+    float armLength;
+    if (!edit.GetGizmoPlacement(model, camera, worldOrigin, armLength))
+        return;
+
+    GizmoBuilder::BuildTranslateGizmo(worldOrigin, armLength, edit.GetHighlightedGizmoAxis(),
+        gizmoLineScratch, gizmoTriScratch);
+    gizmo.Upload(gizmoLineScratch, gizmoTriScratch);
+
+    const float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
+    const glm::mat4 viewProj = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
+
+    //항상 또렷하게 위에 보여야 잡기 쉽다 — 깊이 테스트/컬링을 끄고 그린다.
+    //(화살촉 옆면/밑면을 감는 방향 신경 안 쓰고 만든 것도 컬링을 끈다는 전제 때문이다)
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    gizmoShader->use();
+    gizmoShader->setMat4("viewProj", viewProj);
+
+    glBindVertexArray(gizmo.GetVAO());
+
+    if (gizmo.GetLineCount() > 0)
+    {
+        glLineWidth(3.0f);   //코어 프로파일 드라이버에 따라 무시될 수 있지만 해될 건 없다
+        glDrawArrays(GL_LINES, 0, (GLsizei)gizmo.GetLineCount());
+        stats.AddDrawCall(0);
+    }
+    if (gizmo.GetTriVertexCount() > 0)
+    {
+        glDrawArrays(GL_TRIANGLES, (GLint)gizmo.GetLineCount(), (GLsizei)gizmo.GetTriVertexCount());
+        stats.AddDrawCall(0);
+    }
+
+    glBindVertexArray(0);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
 }

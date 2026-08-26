@@ -66,6 +66,9 @@
     <ClCompile Include="src\cpp\Render\FrameStats.cpp">
       <Filter>소스 파일\Render</Filter>
     </ClCompile>
+    <ClCompile Include="src\cpp\Render\Gizmo.cpp">
+      <Filter>소스 파일\Render</Filter>
+    </ClCompile>
     <ClCompile Include="src\cpp\Render\Mesh.cpp">
       <Filter>소스 파일\Render</Filter>
     </ClCompile>
@@ -135,6 +138,12 @@
       <Filter>헤더 파일\Render</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Render\FrameStats.h">
+      <Filter>헤더 파일\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Render\Gizmo.h">
+      <Filter>헤더 파일\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\header\Render\GizmoAxis.h">
       <Filter>헤더 파일\Render</Filter>
     </ClInclude>
     <ClInclude Include="src\header\Render\Mesh.h">

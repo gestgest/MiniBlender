@@ -41,6 +41,36 @@ namespace
     }
 }
 
+namespace
+{
+    //월드 좌표 -> 화면 픽셀. PickVertexAt이 로컬 좌표에 model까지 곱해서 하는 것과 같은 계산인데,
+    //기즈모 원점은 이미 model을 곱해 월드 공간으로 만들어 두므로 viewProj만 받는다.
+    //카메라 뒤쪽(w<=0)이면 투영이 의미 없으니 실패를 알린다.
+    bool ProjectWorldToScreen(const glm::vec3& worldPos, const glm::mat4& viewProj,
+        int screenW, int screenH, glm::vec2& outScreen)
+    {
+        const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
+        if (clip.w <= 0.0f)
+            return false;
+
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        outScreen.x = (ndc.x * 0.5f + 0.5f) * (float)screenW;
+        outScreen.y = (1.0f - (ndc.y * 0.5f + 0.5f)) * (float)screenH;
+        return true;
+    }
+
+    //점 p에서 선분 ab까지의 최단 거리의 제곱 (화면 픽셀 좌표계에서 축 화살표 피킹에 쓴다)
+    float DistancePointToSegment2(const glm::vec2& p, const glm::vec2& a, const glm::vec2& b)
+    {
+        const glm::vec2 ab = b - a;
+        const float len2 = glm::dot(ab, ab);
+        const float t = (len2 > 1e-8f) ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+        const glm::vec2 closest = a + ab * t;
+        const glm::vec2 diff = p - closest;
+        return glm::dot(diff, diff);
+    }
+}
+
 void EditMode::Init()
 {
     MakePointVAO(pointVAO, pointVBO);
@@ -582,6 +612,114 @@ void EditMode::DragSelected(float dxPixels, float dyPixels, const OrbitCamera& c
                                - up * (dyPixels * worldPerPixel);   //화면 y는 아래가 +
 
     //월드 이동량을 오브젝트 로컬 공간으로 되돌린다 (오브젝트가 회전/스케일돼 있을 수 있으므로)
+    const glm::mat3 invModel = glm::inverse(glm::mat3(model));
+    const glm::vec3 localDelta = invModel * worldDelta;
+
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        if (selectedFlags[i])
+            uniquePositions[i] += localDelta;
+    }
+
+    ApplyPositionChange();
+}
+
+//--- 이동 기즈모 ---
+
+bool EditMode::GetGizmoPlacement(const glm::mat4& model, const OrbitCamera& camera,
+    glm::vec3& outWorldOrigin, float& outArmLength) const
+{
+    if (!active || selectedCount <= 0)
+        return false;
+
+    glm::vec3 centroidLocal(0.0f);
+    for (size_t i = 0; i < uniquePositions.size(); ++i)
+    {
+        if (selectedFlags[i])
+            centroidLocal += uniquePositions[i];
+    }
+    centroidLocal /= (float)selectedCount;
+
+    outWorldOrigin = glm::vec3(model * glm::vec4(centroidLocal, 1.0f));
+
+    //화면에서 항상 비슷한 크기로 보이도록 카메라와의 거리에 비례시킨다.
+    //SurfaceBias와 같은 이유 — 오브젝트가 아주 작든 크든 화면 기준 크기는 일정해야 조작하기 편하다.
+    outArmLength = glm::length(outWorldOrigin - camera.GetPosition()) * 0.15f;
+    return true;
+}
+
+GizmoAxis EditMode::PickGizmoAxis(float mouseX, float mouseY, int screenW, int screenH,
+    const glm::mat4& viewProj, const glm::mat4& model, const OrbitCamera& camera,
+    float maxPixelDistance) const
+{
+    glm::vec3 worldOrigin;
+    float armLength;
+    if (!GetGizmoPlacement(model, camera, worldOrigin, armLength))
+        return GizmoAxis::None;
+
+    glm::vec2 screenOrigin;
+    if (!ProjectWorldToScreen(worldOrigin, viewProj, screenW, screenH, screenOrigin))
+        return GizmoAxis::None;
+
+    const GizmoAxis axes[3] = { GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z };
+    const glm::vec2 mouse(mouseX, mouseY);
+
+    GizmoAxis best = GizmoAxis::None;
+    float bestDist2 = maxPixelDistance * maxPixelDistance;
+
+    for (GizmoAxis axis : axes)
+    {
+        glm::vec2 screenTip;
+        if (!ProjectWorldToScreen(worldOrigin + GizmoAxisDirection(axis) * armLength,
+            viewProj, screenW, screenH, screenTip))
+            continue;
+
+        const float d2 = DistancePointToSegment2(mouse, screenOrigin, screenTip);
+        if (d2 < bestDist2)
+        {
+            bestDist2 = d2;
+            best = axis;
+        }
+    }
+
+    return best;
+}
+
+void EditMode::DragSelectedAlongAxis(GizmoAxis axis, float dxPixels, float dyPixels,
+    const OrbitCamera& camera, int screenW, int screenH,
+    const glm::mat4& model, const glm::mat4& viewProj)
+{
+    if (!active || selectedCount <= 0 || axis == GizmoAxis::None)
+        return;
+
+    glm::vec3 worldOrigin;
+    float armLength;
+    if (!GetGizmoPlacement(model, camera, worldOrigin, armLength))
+        return;
+
+    //마우스 이동을 "축의 화면상 방향"에 투영해서 옮길 양을 구한다.
+    //먼저 원점과, 그 축으로 딱 1 월드 단위 떨어진 점을 화면에 투영해서
+    //"이 축 방향으로 1 단위 움직이면 화면에서 몇 픽셀, 어느 방향으로 움직이는가"를 얻는다.
+    const glm::vec3 worldAxisDir = GizmoAxisDirection(axis);
+
+    glm::vec2 screenOrigin, screenUnitTip;
+    if (!ProjectWorldToScreen(worldOrigin, viewProj, screenW, screenH, screenOrigin))
+        return;
+    if (!ProjectWorldToScreen(worldOrigin + worldAxisDir, viewProj, screenW, screenH, screenUnitTip))
+        return;
+
+    const glm::vec2 screenAxis = screenUnitTip - screenOrigin;   //1 월드 단위당 픽셀 이동(방향+크기)
+    const float screenAxisLen2 = glm::dot(screenAxis, screenAxis);
+    if (screenAxisLen2 < 1e-6f)
+        return;   //축이 화면과 거의 나란히(카메라를 정면으로) 놓여 투영이 점으로 뭉개진 경우
+
+    //마우스 이동량을 screenAxis 방향으로 정사영한 뒤, 그 축의 "픽셀당 월드 단위"로 나눈다.
+    const glm::vec2 mouseDelta(dxPixels, dyPixels);
+    const float worldMove = glm::dot(mouseDelta, screenAxis) / screenAxisLen2;
+
+    const glm::vec3 worldDelta = worldAxisDir * worldMove;
+
+    //월드 이동량을 오브젝트 로컬 공간으로 되돌린다 (DragSelected와 같은 이유)
     const glm::mat3 invModel = glm::inverse(glm::mat3(model));
     const glm::vec3 localDelta = invModel * worldDelta;
 

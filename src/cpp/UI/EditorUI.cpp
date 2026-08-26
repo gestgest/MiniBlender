@@ -373,7 +373,7 @@ void EditorUI::DrawOutliner(Scene& scene, History& history)
         if (ImGui::BeginPopupModal("원기둥 세그먼트", &showCylinderSegmentsPopup,
             ImGuiWindowFlags_AlwaysAutoResize))
         {
-            ImGui::TextUnformatted("옆면 각 수를 정하세요. 낮으면 동전처럼 각지고, 높으면 매끈한 원통이 됩니다.");
+            ImGui::TextUnformatted("옆면 각 수");
             ImGui::SliderInt("세그먼트", &cylinderSegments, 3, 128);
 
             if (ImGui::Button("추가"))

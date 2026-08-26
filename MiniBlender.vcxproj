@@ -151,6 +151,7 @@
     <ClCompile Include="src\cpp\Loader\SceneImport.cpp" />
     <ClCompile Include="src\cpp\Render\Benchmark.cpp" />
     <ClCompile Include="src\cpp\Render\FrameStats.cpp" />
+    <ClCompile Include="src\cpp\Render\Gizmo.cpp" />
     <ClCompile Include="src\cpp\Render\Mesh.cpp" />
     <ClCompile Include="src\cpp\Render\OrbitCamera.cpp" />
     <ClCompile Include="src\cpp\Render\Renderer.cpp" />
@@ -179,6 +180,8 @@
     <ClInclude Include="src\header\Loader\SceneImport.h" />
     <ClInclude Include="src\header\Render\Benchmark.h" />
     <ClInclude Include="src\header\Render\FrameStats.h" />
+    <ClInclude Include="src\header\Render\Gizmo.h" />
+    <ClInclude Include="src\header\Render\GizmoAxis.h" />
     <ClInclude Include="src\header\Render\Mesh.h" />
     <ClInclude Include="src\header\Render\OrbitCamera.h" />
     <ClInclude Include="src\header\Render\Renderer.h" />
@@ -195,6 +198,8 @@
     <None Include="src\vs\point.vs" />
     <None Include="src\fs\point.fs" />
     <None Include="src\fs\grid.fs" />
+    <None Include="src\vs\gizmo.vs" />
+    <None Include="src\fs\gizmo.fs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
