@@ -186,6 +186,8 @@ void Renderer::DrawObjectsInstanced(Scene& scene, FrameStats& stats)
         group.mesh->BindInstanceBuffer(instanceVBO, group.first * sizeof(InstanceData));
 
         glBindVertexArray(group.mesh->GetVAO());
+
+        //씬 인스턴스
         glDrawElementsInstanced(GL_TRIANGLES, group.mesh->GetIndexCount(),
             GL_UNSIGNED_INT, nullptr, (GLsizei)group.count);
 

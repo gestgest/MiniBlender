@@ -60,6 +60,7 @@ void Mesh::Upload(const std::vector<Vertex>& vertices, const std::vector<unsigne
     //예전 방식은 "바인딩해서 현재 대상을 바꾼 뒤 조작"이라 전역 상태에 의존하고 버그가 잘 났다.
     //DSA는 객체를 직접 지목해서 조작하니 바인딩 순서 실수가 원천 차단된다.
     glCreateBuffers(1, &vbo);
+
     //DYNAMIC_STORAGE_BIT: 나중에 glNamedBufferSubData로 내용을 고칠 수 있게 한다.
     //편집 모드에서 정점을 옮기려면 필수. 이 플래그 없이 만든 버퍼는 수정이 거부된다.
     glNamedBufferStorage(vbo, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_STORAGE_BIT);
@@ -121,6 +122,7 @@ void Mesh::BindInstanceBuffer(unsigned int instanceVBO, size_t byteOffset)
     glVertexArrayVertexBuffer(vao, 1, instanceVBO, (GLintptr)byteOffset, sizeof(InstanceData));
 }
 
+
 void Mesh::UpdateVertices(const std::vector<Vertex>& vertices)
 {
     if (vbo == 0 || vertices.size() != vertexCount)
@@ -133,6 +135,7 @@ void Mesh::UpdateVertices(const std::vector<Vertex>& vertices)
     RecomputeBounds(vertices);
 }
 
+//GPU에만 있는 정점 정보를 OBJ로 변환시킬때 바로 값을 되돌리는 것
 bool Mesh::ReadBack(std::vector<Vertex>& outVertices, std::vector<unsigned int>& outIndices) const
 {
     if (vbo == 0 || ebo == 0 || vertexCount == 0 || indexCount == 0)
@@ -163,6 +166,11 @@ void Mesh::RecomputeBounds(const std::vector<Vertex>& vertices)
         boundsMax = glm::max(boundsMax, v.position);
     }
 }
+
+
+
+
+
 
 namespace Primitives
 {
