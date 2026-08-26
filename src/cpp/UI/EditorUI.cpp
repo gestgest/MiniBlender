@@ -347,15 +347,62 @@ void EditorUI::DrawOutliner(Scene& scene, History& history)
             {
                 if (ImGui::Selectable(meshName.c_str()))
                 {
-                    //씬 목록을 앞뒤로 떠서 비교한다. 추가/삭제마다 기록 코드를 따로 쓰지 않아도
-                    //되돌리기가 따라붙고, 복사는 클릭한 순간 한 번뿐이라 비용도 없다.
-                    const std::vector<SceneObject> before = scene.GetObjects();
-                    SceneObject* obj = scene.AddObject(meshName, meshName);
-                    selectedId = obj->id;
-                    history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 추가"));
+                    //원기둥은 세그먼트 수에 따라 동전(각지게)부터 매끈한 원통까지 모양이 갈리니
+                    //바로 추가하지 않고 몇 각형으로 만들지 먼저 물어본다.
+                    if (meshName == "Cylinder")
+                    {
+                        showCylinderSegmentsPopup = true;
+                    }
+                    else
+                    {
+                        //씬 목록을 앞뒤로 떠서 비교한다. 추가/삭제마다 기록 코드를 따로 쓰지 않아도
+                        //되돌리기가 따라붙고, 복사는 클릭한 순간 한 번뿐이라 비용도 없다.
+                        const std::vector<SceneObject> before = scene.GetObjects();
+                        SceneObject* obj = scene.AddObject(meshName, meshName);
+                        selectedId = obj->id;
+                        history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 추가"));
+                    }
                 }
             }
             ImGui::EndCombo();
+        }
+
+        if (showCylinderSegmentsPopup)
+            ImGui::OpenPopup("원기둥 세그먼트");
+
+        if (ImGui::BeginPopupModal("원기둥 세그먼트", &showCylinderSegmentsPopup,
+            ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::TextUnformatted("옆면 각 수를 정하세요. 낮으면 동전처럼 각지고, 높으면 매끈한 원통이 됩니다.");
+            ImGui::SliderInt("세그먼트", &cylinderSegments, 3, 128);
+
+            if (ImGui::Button("추가"))
+            {
+                //콤보에 미리 구워둔 "Cylinder"(32각)와 별개로, 요청한 세그먼트로 새 메시를 만들어
+                //라이브러리에 등록한다. 이렇게 만든 메시도 이후 콤보 목록에 그대로 나타나 재사용된다.
+                std::vector<Vertex> verts;
+                std::vector<unsigned int> indices;
+                Primitives::MakeCylinder(verts, indices, cylinderSegments);
+
+                char nameBuf[64];
+                std::snprintf(nameBuf, sizeof(nameBuf), "Cylinder_%d각", cylinderSegments);
+
+                const std::vector<SceneObject> before = scene.GetObjects();
+                Mesh* mesh = scene.AddMesh(nameBuf, verts, indices);
+                SceneObject* obj = scene.AddObject(mesh->GetName(), mesh->GetName());
+                selectedId = obj->id;
+                history.Push(History::MakeSceneDiff(before, scene.GetObjects(), "오브젝트 추가"));
+
+                showCylinderSegmentsPopup = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("취소"))
+            {
+                showCylinderSegmentsPopup = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
         }
 
         //드로우콜 부하 테스트용. 이걸 눌러서 숫자가 어떻게 변하는지 보는 게 이 프로젝트의 재미.

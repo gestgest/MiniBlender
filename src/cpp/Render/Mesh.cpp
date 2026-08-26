@@ -287,8 +287,9 @@ void MakeCylinder(std::vector<Vertex>& v, std::vector<unsigned int>& idx, int se
     for (int s = 0; s < segments; ++s)
     {
         unsigned int a = s * 2;
-        idx.push_back(a); idx.push_back(a + 2); idx.push_back(a + 1);
-        idx.push_back(a + 1); idx.push_back(a + 2); idx.push_back(a + 3);
+        //감는 순서가 뒤집혀 있으면 컬링 때문에 바깥이 아니라 안쪽 면이 그려진다(구멍 뚫린 것처럼 보임).
+        idx.push_back(a); idx.push_back(a + 1); idx.push_back(a + 2);
+        idx.push_back(a + 1); idx.push_back(a + 3); idx.push_back(a + 2);
     }
 
     //뚜껑: 옆면과 노멀이 완전히 달라서(수직) 버텍스를 따로 만든다
@@ -312,14 +313,14 @@ void MakeCylinder(std::vector<Vertex>& v, std::vector<unsigned int>& idx, int se
             if (cap == 0)
             {
                 idx.push_back(center);
-                idx.push_back(center + 1 + s);
                 idx.push_back(center + 2 + s);
+                idx.push_back(center + 1 + s);
             }
             else
             {
                 idx.push_back(center);
-                idx.push_back(center + 2 + s);
                 idx.push_back(center + 1 + s);
+                idx.push_back(center + 2 + s);
             }
         }
     }

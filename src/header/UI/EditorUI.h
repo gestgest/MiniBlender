@@ -82,6 +82,10 @@ private:
     bool pendingUndo = false;
     bool pendingRedo = false;
 
+    //원기둥 세그먼트 지정 팝업 상태. 동전처럼 각진 모양이 필요할 때 추가 시점에 물어본다.
+    bool showCylinderSegmentsPopup = false;
+    int cylinderSegments = 32;
+
     //성능 그래프용 링버퍼. 숫자 하나만 보면 튀는 프레임(스파이크)을 놓친다.
     static const int HISTORY = 120;
     float cpuHistory[HISTORY] = {};
