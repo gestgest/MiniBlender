@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Render/Mesh.h>
 #include <Scene/SceneObject.h>
 
 #include <glm/glm.hpp>
@@ -46,13 +47,22 @@ struct Action
     SceneObject before;
     SceneObject after;
 
-    //--- 정점 편집 ---
+    //--- 정점 편집 (위치만 바뀜, 개수는 그대로) ---
     Mesh* mesh = nullptr;
     std::vector<VertexDelta> vertexDeltas;
 
+    //--- 위상 편집 (돌출/인셋처럼 정점·삼각형 개수 자체가 바뀌는 편집) ---
+    //VertexDelta로는 표현이 안 된다(인덱스가 같은 배열을 가리킨다는 전제가 깨진다).
+    //ObjectSnapshot과 같은 사고방식으로, 전/후 메시 전체를 통째로 들고 있다가
+    //되돌릴 땐 mesh->Upload()로 통째로 되돌린다.
+    Mesh* topologyMesh = nullptr;
+    std::vector<Vertex> topoBeforeVertices, topoAfterVertices;
+    std::vector<unsigned int> topoBeforeIndices, topoAfterIndices;
+
     bool IsEmpty() const
     {
-        return removed.empty() && added.empty() && !hasChange && vertexDeltas.empty();
+        return removed.empty() && added.empty() && !hasChange
+            && vertexDeltas.empty() && topologyMesh == nullptr;
     }
 };
 

@@ -32,6 +32,10 @@ public:
     void RenderGizmo(const class EditMode& edit, const Scene& scene,
         const OrbitCamera& camera, int width, int height, FrameStats& stats);
 
+    //면 선택 모드에서 선택된 면을 반투명 주황으로 덧칠한다.
+    void RenderFaceHighlight(const class EditMode& edit, const Scene& scene,
+        const OrbitCamera& camera, int width, int height, FrameStats& stats);
+
     //그리드 on/off (UI에서 토글)
     bool showGrid = true;
 
@@ -73,6 +77,7 @@ private:
     Shader* gridShader = nullptr;
     Shader* pointShader = nullptr;
     Shader* gizmoShader = nullptr;
+    Shader* faceHighlightShader = nullptr;
 
     //이동 기즈모 지오메트리. 매 프레임 위치/크기/강조색이 바뀔 수 있어 내용을 다시 올린다.
     Gizmo gizmo;

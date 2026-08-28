@@ -19,6 +19,7 @@ void Renderer::Init()
     gridShader = new Shader("src/vs/grid.vs", "src/fs/grid.fs");
     pointShader = new Shader("src/vs/point.vs", "src/fs/point.fs");
     gizmoShader = new Shader("src/vs/gizmo.vs", "src/fs/gizmo.fs");
+    faceHighlightShader = new Shader("src/vs/facehighlight.vs", "src/fs/facehighlight.fs");
 
     glCreateVertexArrays(1, &emptyVAO);
     gizmo.Init();
@@ -31,6 +32,7 @@ void Renderer::Shutdown()
     delete gridShader;   gridShader = nullptr;
     delete pointShader;  pointShader = nullptr;
     delete gizmoShader;  gizmoShader = nullptr;
+    delete faceHighlightShader; faceHighlightShader = nullptr;
     gizmo.Shutdown();
 
     if (emptyVAO != 0)
@@ -332,4 +334,58 @@ void Renderer::RenderGizmo(const EditMode& edit, const Scene& scene,
     glBindVertexArray(0);
     glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
+}
+
+void Renderer::RenderFaceHighlight(const EditMode& edit, const Scene& scene,
+    const OrbitCamera& camera, int width, int height, FrameStats& stats)
+{
+    if (!edit.IsActive() || edit.GetFaceVertexCount() <= 0)
+        return;
+
+    const SceneObject* obj = nullptr;
+    for (const SceneObject& o : scene.GetObjects())
+    {
+        if (o.id == edit.GetObjectId()) { obj = &o; break; }
+    }
+    if (obj == nullptr)
+        return;
+
+    const float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
+    const glm::mat4 projection = camera.GetProjectionMatrix(aspect);
+    const glm::mat4 modelView = camera.GetViewMatrix() * obj->transform.GetMatrix();
+
+    faceHighlightShader->use();
+    faceHighlightShader->setMat4("modelView", modelView);
+    faceHighlightShader->setMat4("projection", projection);
+
+    //RenderEditPoints와 같은 원칙: X-Ray면 깊이 테스트 없이(뒷면도 보임), 아니면 살짝 당겨서
+    //자기가 얹힌 면과 z-파이팅 없이 이긴다. 같은 SurfaceBias를 써서 점/기즈모 판정과도 어긋나지 않는다.
+    if (edit.IsXRay())
+    {
+        glDisable(GL_DEPTH_TEST);
+        faceHighlightShader->setFloat("depthNudge", 0.0f);
+    }
+    else
+    {
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        faceHighlightShader->setFloat("depthNudge", EditMode::SurfaceBias(camera.GetDistance()));
+    }
+
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);   //반투명 칠이라 뒷면도 보여야 자연스럽다
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glBindVertexArray(edit.GetFaceVAO());
+    glDrawArrays(GL_TRIANGLES, 0, edit.GetFaceVertexCount());
+    stats.AddDrawCall(0);
+
+    //다음 패스가 기본 상태를 기대하므로 되돌려 놓는다
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glBindVertexArray(0);
 }

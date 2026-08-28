@@ -200,6 +200,8 @@
     <None Include="src\fs\grid.fs" />
     <None Include="src\vs\gizmo.vs" />
     <None Include="src\fs\gizmo.fs" />
+    <None Include="src\vs\facehighlight.vs" />
+    <None Include="src\fs\facehighlight.fs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

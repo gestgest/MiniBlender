@@ -58,6 +58,19 @@ namespace
 
         mesh->UpdateVertices(vertices);
     }
+
+    //위상 스냅샷을 통째로 되돌린다. UpdateVertices와 달리 정점 개수가 바뀔 수 있어서
+    //Upload()로 VAO/VBO/EBO를 통째로 다시 만든다.
+    void ApplyTopologySnapshot(Mesh* mesh, const Action& action, bool undo)
+    {
+        if (mesh == nullptr)
+            return;
+
+        if (undo)
+            mesh->Upload(action.topoBeforeVertices, action.topoBeforeIndices);
+        else
+            mesh->Upload(action.topoAfterVertices, action.topoAfterIndices);
+    }
 }
 
 void History::Push(Action&& action)
@@ -148,6 +161,15 @@ void History::Apply(const Action& action, bool undo, Scene& scene, EditMode& edi
         //편집 모드가 이 메시를 열어둔 채라면 CPU 사본이 낡았다.
         //다시 읽어오지 않으면 화면의 점과 실제 메시가 어긋나서 다음 편집이 엉뚱한 곳에 적용된다.
         edit.RefreshIfEditing(scene, action.mesh);
+    }
+
+    if (action.topologyMesh != nullptr)
+    {
+        ApplyTopologySnapshot(action.topologyMesh, action, undo);
+
+        //RefreshIfEditing은 정점 개수가 달라지면 선택을 못 살리고 새로 진입한다 —
+        //위상이 바뀌는 되돌리기 뒤엔 선택이 풀리는 게 자연스러운 동작이라 그대로 둔다.
+        edit.RefreshIfEditing(scene, action.topologyMesh);
     }
 }
 

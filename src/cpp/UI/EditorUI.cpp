@@ -545,32 +545,70 @@ void EditorUI::DrawInspector(Scene& scene, OrbitCamera& camera, EditMode& edit, 
                         "켜면: 메시를 통과해 뒤쪽 정점까지 보이고 잡힙니다.");
                 }
 
-                if (edit.GetSelectedCount() == 0)
+                //--- 선택 모드: 정점 / 면 ---
+                //바꾸면 반대쪽 선택이 풀린다(EditMode::SetSelectMode) — 점 하이라이트와 면 하이라이트가
+                //동시에 남아있으면 지금 뭘 조작하는 중인지 헷갈린다.
+                int modeIdx = (edit.GetSelectMode() == EditSelectMode::Face) ? 1 : 0;
+                if (ImGui::RadioButton("정점", modeIdx == 0)) edit.SetSelectMode(EditSelectMode::Vertex);
+                ImGui::SameLine();
+                if (ImGui::RadioButton("면", modeIdx == 1)) edit.SetSelectMode(EditSelectMode::Face);
+
+                if (edit.GetSelectMode() == EditSelectMode::Vertex)
                 {
-                    ImGui::TextDisabled("정점 클릭 = 선택, 드래그 = 이동");
-                    ImGui::TextDisabled("빈 곳에서 드래그 = 박스 선택");
-                    ImGui::TextDisabled("Shift + 클릭 = 선택에 추가/제외");
-                    if (!edit.IsXRay())
-                        ImGui::TextDisabled("뒤쪽 정점은 시점을 돌리거나 Alt+Z");
+                    if (edit.GetSelectedCount() == 0)
+                    {
+                        ImGui::TextDisabled("정점 클릭 = 선택, 드래그 = 이동");
+                        ImGui::TextDisabled("빈 곳에서 드래그 = 박스 선택");
+                        ImGui::TextDisabled("Shift + 클릭 = 선택에 추가/제외");
+                        if (!edit.IsXRay())
+                            ImGui::TextDisabled("뒤쪽 정점은 시점을 돌리거나 Alt+Z");
+                    }
+                    else
+                    {
+                        ImGui::Text("선택: %d개 (활성 #%d)", edit.GetSelectedCount(), edit.GetActiveVertex());
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("해제"))
+                            edit.ClearSelection();
+
+                        //숫자 편집은 활성 정점 하나에만 적용된다 (여럿을 한 점으로 접지 않으려고)
+                        glm::vec3 pos = edit.GetSelectedPosition();
+                        const bool moved = ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f);
+
+                        //BeginStroke가 값을 적용하기 "전"에 와야 편집 전 상태가 잡힌다
+                        if (ImGui::IsItemActivated())
+                            edit.BeginStroke();
+                        if (moved)
+                            edit.SetSelectedPosition(pos);
+                        if (ImGui::IsItemDeactivatedAfterEdit())
+                            edit.CommitStroke(history, "정점 이동");
+                    }
                 }
-                else
+                else   //Face
                 {
-                    ImGui::Text("선택: %d개 (활성 #%d)", edit.GetSelectedCount(), edit.GetActiveVertex());
-                    ImGui::SameLine();
-                    if (ImGui::SmallButton("해제"))
-                        edit.ClearSelection();
+                    if (!edit.HasActiveFace())
+                    {
+                        ImGui::TextDisabled("면 클릭 = 선택");
+                    }
+                    else
+                    {
+                        ImGui::Text("선택된 면: %d각형", edit.GetActiveFaceSides());
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("해제"))
+                            edit.ClearFaceSelection();
 
-                    //숫자 편집은 활성 정점 하나에만 적용된다 (여럿을 한 점으로 접지 않으려고)
-                    glm::vec3 pos = edit.GetSelectedPosition();
-                    const bool moved = ImGui::DragFloat3("로컬 좌표", &pos.x, 0.005f);
+                        //돌출: 선택된 면을 복제해 제자리에 띄우고, 정점 모드로 넘어가 새 정점을
+                        //전부 선택한다 — 이어서 뜨는 이동 기즈모로 바로 끌어올리면 된다.
+                        if (ImGui::Button("돌출"))
+                            edit.ExtrudeActiveFace(history);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("면을 복제해 띄웁니다. 이어서 이동 기즈모로 끌어올리세요.");
 
-                    //BeginStroke가 값을 적용하기 "전"에 와야 편집 전 상태가 잡힌다
-                    if (ImGui::IsItemActivated())
-                        edit.BeginStroke();
-                    if (moved)
-                        edit.SetSelectedPosition(pos);
-                    if (ImGui::IsItemDeactivatedAfterEdit())
-                        edit.CommitStroke(history, "정점 이동");
+                        ImGui::SliderFloat("인셋 비율", &insetRatio, 0.01f, 0.9f);
+                        if (ImGui::Button("인셋 적용"))
+                            edit.InsetActiveFace(insetRatio, history);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("경계를 안쪽으로 당겨 테두리 링을 만들고, 안쪽 면을 이어서 선택합니다.");
+                    }
                 }
             }
         }

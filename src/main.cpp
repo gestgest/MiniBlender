@@ -307,11 +307,18 @@ int main(int argc, char** argv)
                 const bool shiftDown = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
                     || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
+                if (edit.GetSelectMode() == EditSelectMode::Face)
+                {
+                    //면 모드: 드래그/박스선택/기즈모 없이 클릭 한 번 = 선택. 돌출/인셋은 속성 패널 버튼으로.
+                    if (leftDown && !leftWasDown)
+                        edit.PickFaceAt((float)mx, (float)my, fbW, fbH, viewProj, model);
+                    vertexDragging = false;   //정점 드래그 잔여 상태 방지
+                }
                 //누른 자리에 정점이 있었는지가 이번 드래그의 성격을 정한다.
                 //  정점 위에서 시작 -> 이동
                 //  빈 곳에서 시작   -> 박스 선택
                 //블렌더와 같은 구분이고, 둘 다 좌클릭 드래그라 이 판단이 없으면 서로를 잡아먹는다.
-                if (leftDown && !leftWasDown)
+                else if (leftDown && !leftWasDown)
                 {
                     //기즈모 화살표가 먼저다 — 선택된 정점 위에 화살표가 겹쳐 있을 때
                     //"축으로만 옮기기"를 누른 것으로 봐야지, 정점을 다시 고르는 걸로 보면 안 된다.
@@ -547,6 +554,7 @@ int main(int argc, char** argv)
         renderer.RenderScene(scene, camera, fbWidth, fbHeight, stats);
         renderer.RenderEditPoints(edit, scene, camera, fbWidth, fbHeight, stats);
         renderer.RenderGizmo(edit, scene, camera, fbWidth, fbHeight, stats);
+        renderer.RenderFaceHighlight(edit, scene, camera, fbWidth, fbHeight, stats);
 
         //--- UI ---
         if (!bench.ShouldSkipUI())

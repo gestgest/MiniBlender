@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <map>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -75,6 +77,7 @@ void EditMode::Init()
 {
     MakePointVAO(pointVAO, pointVBO);
     MakePointVAO(selectedVAO, selectedVBO);
+    MakePointVAO(faceVAO, faceVBO);   //vec3-only 레이아웃이 같아서 그대로 재사용 (그리는 방식만 다르다)
 }
 
 void EditMode::Shutdown()
@@ -83,6 +86,8 @@ void EditMode::Shutdown()
     if (pointVBO != 0) { glDeleteBuffers(1, &pointVBO); pointVBO = 0; }
     if (selectedVAO != 0) { glDeleteVertexArrays(1, &selectedVAO); selectedVAO = 0; }
     if (selectedVBO != 0) { glDeleteBuffers(1, &selectedVBO); selectedVBO = 0; }
+    if (faceVAO != 0) { glDeleteVertexArrays(1, &faceVAO); faceVAO = 0; }
+    if (faceVBO != 0) { glDeleteBuffers(1, &faceVBO); faceVBO = 0; }
 }
 
 bool EditMode::Enter(Scene& scene, unsigned int id)
@@ -99,6 +104,17 @@ bool EditMode::Enter(Scene& scene, unsigned int id)
     targetMesh = obj->mesh;
     objectId = id;
 
+    RebuildWeldGroups();
+    ClearFaceSelection();
+
+    active = true;
+    UploadPoints();
+    UploadSelectedPoints();
+    return true;
+}
+
+void EditMode::RebuildWeldGroups()
+{
     //--- 같은 위치의 정점들을 묶는다 ---
     uniquePositions.clear();
     weldGroups.clear();
@@ -123,11 +139,6 @@ bool EditMode::Enter(Scene& scene, unsigned int id)
     selectedFlags.assign(uniquePositions.size(), 0);
     selectedCount = 0;
     activeVertex = -1;
-
-    active = true;
-    UploadPoints();
-    UploadSelectedPoints();
-    return true;
 }
 
 void EditMode::BeginStroke()
@@ -214,6 +225,9 @@ void EditMode::Exit()
     selectedCount = 0;
     activeVertex = -1;
     boxSelecting = false;
+
+    activeFaceTris.clear();
+    faceHighlightCount = 0;
 
     //기록 중이던 스트로크는 버린다. Enter가 Exit을 먼저 부르기 때문에
     //RefreshIfEditing 도중에도 여기를 지나는데, 그때 남은 사본은 이미 쓸모가 없다.
@@ -802,4 +816,464 @@ void EditMode::ApplyPositionChange()
 
     UploadPoints();
     UploadSelectedPoints();
+}
+
+//--- 면 선택 / 인셋 / 돌출 ---
+
+namespace
+{
+    //화면 픽셀 -> 로컬 공간 광선. Picking.cpp의 MakeRay와 원리는 같지만, 여기선 viewProj와
+    //model을 미리 합쳐서 넘겨받아 한 번의 역행렬로 곧장 로컬 공간 광선을 얻는다
+    //(오브젝트 하나만 상대하니 월드를 거칠 필요가 없다).
+    struct LocalRay
+    {
+        glm::vec3 origin{ 0.0f };
+        glm::vec3 dir{ 0.0f };
+    };
+
+    LocalRay MakeLocalRay(float mouseX, float mouseY, int screenW, int screenH,
+        const glm::mat4& viewProj, const glm::mat4& model)
+    {
+        const glm::mat4 invMVP = glm::inverse(viewProj * model);
+
+        const float ndcX = 2.0f * mouseX / (float)screenW - 1.0f;
+        const float ndcY = 1.0f - 2.0f * mouseY / (float)screenH;   //화면 y는 아래가 +
+
+        glm::vec4 nearPoint = invMVP * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+        glm::vec4 farPoint = invMVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+        nearPoint /= nearPoint.w;
+        farPoint /= farPoint.w;
+
+        LocalRay ray;
+        ray.origin = glm::vec3(nearPoint);
+        ray.dir = glm::normalize(glm::vec3(farPoint - nearPoint));
+        return ray;
+    }
+
+    //Moller-Trumbore. Picking.cpp/IsOccluded와 같은 식이라 결과가 다를 이유가 없다.
+    bool RayTriangleLocal(const LocalRay& ray, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+        float& outT)
+    {
+        const glm::vec3 e1 = b - a;
+        const glm::vec3 e2 = c - a;
+        const glm::vec3 pvec = glm::cross(ray.dir, e2);
+        const float det = glm::dot(e1, pvec);
+        if (std::fabs(det) < 1e-12f)
+            return false;
+
+        const float invDet = 1.0f / det;
+        const glm::vec3 tvec = ray.origin - a;
+
+        const float u = glm::dot(tvec, pvec) * invDet;
+        if (u < 0.0f || u > 1.0f)
+            return false;
+
+        const glm::vec3 qvec = glm::cross(tvec, e1);
+        const float v = glm::dot(ray.dir, qvec) * invDet;
+        if (v < 0.0f || u + v > 1.0f)
+            return false;
+
+        const float t = glm::dot(e2, qvec) * invDet;
+        if (t < 0.0f)
+            return false;
+
+        outT = t;
+        return true;
+    }
+
+    //정점 쌍을 순서 무관 키로 (변 인접 테이블 조회용)
+    std::pair<unsigned int, unsigned int> EdgeKey(unsigned int a, unsigned int b)
+    {
+        return (a < b) ? std::make_pair(a, b) : std::make_pair(b, a);
+    }
+}
+
+void EditMode::SetSelectMode(EditSelectMode mode)
+{
+    if (selectMode == mode)
+        return;
+
+    selectMode = mode;
+
+    //모드를 바꾸면 반대쪽 선택은 비운다 — 정점 점과 면 하이라이트가 동시에 남아있으면
+    //지금 뭘 조작하는 중인지 헷갈린다.
+    if (mode == EditSelectMode::Vertex)
+        ClearFaceSelection();
+    else
+        ClearSelection();
+}
+
+void EditMode::ClearFaceSelection()
+{
+    activeFaceTris.clear();
+    faceHighlightCount = 0;
+}
+
+void EditMode::UploadFaceHighlight()
+{
+    std::vector<glm::vec3> tris;
+    tris.reserve(activeFaceTris.size() * 3);
+    for (unsigned int base : activeFaceTris)
+    {
+        tris.push_back(vertices[indices[base]].position);
+        tris.push_back(vertices[indices[base + 1]].position);
+        tris.push_back(vertices[indices[base + 2]].position);
+    }
+
+    faceHighlightCount = tris.size();
+    if (!tris.empty())
+    {
+        glNamedBufferData(faceVBO, (GLsizeiptr)(tris.size() * sizeof(glm::vec3)),
+            tris.data(), GL_STREAM_DRAW);
+    }
+}
+
+int EditMode::GetActiveFaceSides() const
+{
+    return (int)ComputeBoundaryLoop(activeFaceTris).size();
+}
+
+bool EditMode::PickFaceAt(float mouseX, float mouseY, int screenW, int screenH,
+    const glm::mat4& viewProj, const glm::mat4& model)
+{
+    ClearFaceSelection();
+    if (!active || screenW <= 0 || screenH <= 0)
+        return false;
+
+    const LocalRay ray = MakeLocalRay(mouseX, mouseY, screenW, screenH, viewProj, model);
+
+    //--- 1) 광선과 가장 가까이서 만나는 삼각형을 찾는다 ---
+    int hitTri = -1;
+    float bestT = std::numeric_limits<float>::max();
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        float t;
+        if (RayTriangleLocal(ray, vertices[indices[i]].position, vertices[indices[i + 1]].position,
+                vertices[indices[i + 2]].position, t)
+            && t < bestT)
+        {
+            bestT = t;
+            hitTri = (int)i;
+        }
+    }
+
+    if (hitTri < 0)
+        return false;
+
+    //--- 2) 그 삼각형에서 시작해 "평면(법선) 일치 + 변 공유"로 이어진 삼각형을 BFS로 모은다 ---
+    const size_t triCount = indices.size() / 3;
+
+    std::vector<glm::vec3> triNormal(triCount);
+    for (size_t t = 0; t < triCount; ++t)
+    {
+        const glm::vec3& a = vertices[indices[t * 3]].position;
+        const glm::vec3& b = vertices[indices[t * 3 + 1]].position;
+        const glm::vec3& c = vertices[indices[t * 3 + 2]].position;
+        const glm::vec3 n = glm::cross(b - a, c - a);
+        const float len2 = glm::dot(n, n);
+        triNormal[t] = (len2 > 1e-16f) ? glm::normalize(n) : glm::vec3(0.0f);
+    }
+
+    std::map<std::pair<unsigned int, unsigned int>, std::vector<size_t>> edgeTris;
+    for (size_t t = 0; t < triCount; ++t)
+    {
+        unsigned int a = indices[t * 3], b = indices[t * 3 + 1], c = indices[t * 3 + 2];
+        edgeTris[EdgeKey(a, b)].push_back(t);
+        edgeTris[EdgeKey(b, c)].push_back(t);
+        edgeTris[EdgeKey(c, a)].push_back(t);
+    }
+
+    const size_t startTri = (size_t)hitTri / 3;
+    std::vector<char> visited(triCount, 0);
+    std::vector<size_t> stack{ startTri };
+    visited[startTri] = 1;
+
+    std::vector<unsigned int> group;
+    while (!stack.empty())
+    {
+        const size_t t = stack.back();
+        stack.pop_back();
+        group.push_back((unsigned int)(t * 3));
+
+        const unsigned int tv[3] = { indices[t * 3], indices[t * 3 + 1], indices[t * 3 + 2] };
+        for (int e = 0; e < 3; ++e)
+        {
+            const unsigned int a = tv[e], b = tv[(e + 1) % 3];
+            for (size_t other : edgeTris[EdgeKey(a, b)])
+            {
+                if (visited[other])
+                    continue;
+                if (glm::dot(triNormal[other], triNormal[t]) > 0.999f)
+                {
+                    visited[other] = 1;
+                    stack.push_back(other);
+                }
+            }
+        }
+    }
+
+    activeFaceTris = std::move(group);
+    UploadFaceHighlight();
+    return true;
+}
+
+std::vector<unsigned int> EditMode::ComputeBoundaryLoop(const std::vector<unsigned int>& faceTriBases) const
+{
+    //면에 속한 삼각형들의 방향 있는 변을 전부 모은다. 두 삼각형이 안에서 변 하나를 맞대고 있으면
+    //그 변은 한쪽에서 (a,b)로, 다른 쪽에서 (b,a)로 한 번씩 나온다 — 그 짝을 지우면
+    //바깥 경계에 있는, 짝이 없는 변만 남는다.
+    std::set<std::pair<unsigned int, unsigned int>> edges;
+    for (unsigned int base : faceTriBases)
+    {
+        const unsigned int a = indices[base], b = indices[base + 1], c = indices[base + 2];
+        edges.insert({ a, b });
+        edges.insert({ b, c });
+        edges.insert({ c, a });
+    }
+
+    std::map<unsigned int, unsigned int> nextOf;
+    for (const auto& e : edges)
+    {
+        if (edges.find({ e.second, e.first }) == edges.end())
+            nextOf[e.first] = e.second;
+    }
+
+    if (nextOf.empty())
+        return {};
+
+    std::vector<unsigned int> loop;
+    const unsigned int start = nextOf.begin()->first;
+    unsigned int cur = start;
+    do
+    {
+        loop.push_back(cur);
+        auto it = nextOf.find(cur);
+        if (it == nextOf.end())
+            return {};   //닫힌 고리가 아니다(비정상 위상) — 안전하게 포기
+        cur = it->second;
+    } while (cur != start && loop.size() <= nextOf.size());
+
+    return (cur == start) ? loop : std::vector<unsigned int>{};
+}
+
+glm::vec3 EditMode::ComputeFaceNormal(const std::vector<unsigned int>& faceTriBases) const
+{
+    if (faceTriBases.empty())
+        return glm::vec3(0.0f, 1.0f, 0.0f);
+
+    const unsigned int base = faceTriBases.front();
+    const glm::vec3& a = vertices[indices[base]].position;
+    const glm::vec3& b = vertices[indices[base + 1]].position;
+    const glm::vec3& c = vertices[indices[base + 2]].position;
+
+    const glm::vec3 n = glm::cross(b - a, c - a);
+    const float len2 = glm::dot(n, n);
+    return (len2 > 1e-16f) ? glm::normalize(n) : glm::vec3(0.0f, 1.0f, 0.0f);
+}
+
+void EditMode::AppendBridgeRing(const std::vector<unsigned int>& outerLoop,
+    const std::vector<unsigned int>& innerLoop)
+{
+    const size_t n = outerLoop.size();
+    if (n < 3 || n != innerLoop.size())
+        return;
+
+    //MakeCylinder 옆면과 같은 감김 순서(바깥=bottom, 안쪽=top 자리에 대응):
+    //  (outer[i], inner[i], outer[i+1]) / (inner[i], inner[i+1], outer[i+1])
+    for (size_t i = 0; i < n; ++i)
+    {
+        const size_t j = (i + 1) % n;
+        const unsigned int a = outerLoop[i], b = innerLoop[i];
+        const unsigned int c = outerLoop[j], d = innerLoop[j];
+
+        indices.push_back(a); indices.push_back(b); indices.push_back(c);
+        indices.push_back(b); indices.push_back(d); indices.push_back(c);
+    }
+}
+
+void EditMode::AppendFan(const std::vector<unsigned int>& loop, const glm::vec3& normal)
+{
+    if (loop.size() < 3)
+        return;
+
+    //loop[0]을 꼭짓점으로 삼는 부채꼴. 볼록한 면(지금 프리미티브는 전부 볼록)에서만 유효하다.
+    for (size_t i = 1; i + 1 < loop.size(); ++i)
+    {
+        indices.push_back(loop[0]);
+        indices.push_back(loop[i]);
+        indices.push_back(loop[i + 1]);
+    }
+
+    for (unsigned int raw : loop)
+        vertices[raw].normal = normal;
+}
+
+void EditMode::RemoveTriangles(const std::vector<unsigned int>& triBases)
+{
+    std::vector<char> removeMask(indices.size() / 3, 0);
+    for (unsigned int base : triBases)
+        removeMask[base / 3] = 1;
+
+    std::vector<unsigned int> kept;
+    kept.reserve(indices.size());
+    for (size_t t = 0; t < removeMask.size(); ++t)
+    {
+        if (removeMask[t])
+            continue;
+        kept.push_back(indices[t * 3]);
+        kept.push_back(indices[t * 3 + 1]);
+        kept.push_back(indices[t * 3 + 2]);
+    }
+    indices.swap(kept);
+}
+
+void EditMode::CommitTopologyChange(History& history, const std::string& label,
+    std::vector<Vertex>&& beforeVerts, std::vector<unsigned int>&& beforeIdx)
+{
+    if (targetMesh == nullptr)
+        return;
+
+    targetMesh->Upload(vertices, indices);
+
+    Action action;
+    action.label = label;
+    action.topologyMesh = targetMesh;
+    action.topoBeforeVertices = std::move(beforeVerts);
+    action.topoBeforeIndices = std::move(beforeIdx);
+    action.topoAfterVertices = vertices;
+    action.topoAfterIndices = indices;
+    history.Push(std::move(action));
+
+    RebuildWeldGroups();
+    UploadPoints();
+    UploadSelectedPoints();
+}
+
+void EditMode::ExtrudeActiveFace(History& history)
+{
+    if (!active || targetMesh == nullptr || activeFaceTris.empty())
+        return;
+
+    std::vector<Vertex> beforeVerts = vertices;
+    std::vector<unsigned int> beforeIdx = indices;
+
+    const std::vector<unsigned int> outerLoop = ComputeBoundaryLoop(activeFaceTris);
+    if (outerLoop.size() < 3)
+        return;
+
+    //--- 이 면의 삼각형이 참조하는 raw 정점을 전부 모아 복제한다 (경계 + 부채꼴 꼭짓점 등) ---
+    std::vector<unsigned int> faceRaw;
+    for (unsigned int base : activeFaceTris)
+    {
+        faceRaw.push_back(indices[base]);
+        faceRaw.push_back(indices[base + 1]);
+        faceRaw.push_back(indices[base + 2]);
+    }
+    std::sort(faceRaw.begin(), faceRaw.end());
+    faceRaw.erase(std::unique(faceRaw.begin(), faceRaw.end()), faceRaw.end());
+
+    std::map<unsigned int, unsigned int> remap;
+    for (unsigned int raw : faceRaw)
+    {
+        //먼저 값으로 복사해 둔다 — vertices.push_back(vertices[raw])라고 쓰면 재할당이 일어날 때
+        //인자로 넘긴 참조가 push_back 도중에 날아가 버릴 수 있다(자기 자신을 참조하는 push_back).
+        const Vertex duplicate = vertices[raw];
+        const unsigned int newId = (unsigned int)vertices.size();
+        vertices.push_back(duplicate);   //같은 위치/노멀로 복제 — 간격 0에서 시작
+        remap[raw] = newId;
+    }
+
+    //면의 삼각형들을 복제된 정점으로 갈아치운다. 슬롯(activeFaceTris)은 그대로 — 가리키는 정점만 바뀐다.
+    for (unsigned int base : activeFaceTris)
+    {
+        indices[base] = remap[indices[base]];
+        indices[base + 1] = remap[indices[base + 1]];
+        indices[base + 2] = remap[indices[base + 2]];
+    }
+
+    //원래 경계(outer, 이제 아무도 안 쓴다) - 복제된 경계(inner) 사이에 옆면을 잇는다
+    std::vector<unsigned int> innerLoop;
+    innerLoop.reserve(outerLoop.size());
+    for (unsigned int raw : outerLoop)
+        innerLoop.push_back(remap[raw]);
+
+    AppendBridgeRing(outerLoop, innerLoop);
+
+    CommitTopologyChange(history, "돌출", std::move(beforeVerts), std::move(beforeIdx));
+
+    //정점 모드로 바꾸고 새로 뜬 정점들을 전부 선택 — 이동 기즈모가 바로 그 자리에 뜬다.
+    ClearFaceSelection();
+    selectMode = EditSelectMode::Vertex;
+
+    std::fill(selectedFlags.begin(), selectedFlags.end(), (char)0);
+    selectedCount = 0;
+    activeVertex = -1;
+
+    std::set<unsigned int> newRaw;
+    for (const auto& kv : remap)
+        newRaw.insert(kv.second);
+
+    for (size_t u = 0; u < weldGroups.size(); ++u)
+    {
+        for (unsigned int vi : weldGroups[u])
+        {
+            if (newRaw.count(vi))
+            {
+                SetSelectedFlag(u, true);
+                activeVertex = (int)u;
+                break;
+            }
+        }
+    }
+
+    UploadSelectedPoints();
+}
+
+void EditMode::InsetActiveFace(float ratio, History& history)
+{
+    if (!active || targetMesh == nullptr || activeFaceTris.empty())
+        return;
+
+    ratio = glm::clamp(ratio, 0.01f, 0.95f);
+
+    std::vector<Vertex> beforeVerts = vertices;
+    std::vector<unsigned int> beforeIdx = indices;
+
+    const std::vector<unsigned int> outerLoop = ComputeBoundaryLoop(activeFaceTris);
+    if (outerLoop.size() < 3)
+        return;
+
+    const glm::vec3 normal = ComputeFaceNormal(activeFaceTris);
+
+    glm::vec3 centroid(0.0f);
+    for (unsigned int raw : outerLoop)
+        centroid += vertices[raw].position;
+    centroid /= (float)outerLoop.size();
+
+    //안쪽 루프: 경계를 복제한 뒤 무게중심 쪽으로 당긴다
+    std::vector<unsigned int> innerLoop;
+    innerLoop.reserve(outerLoop.size());
+    for (unsigned int raw : outerLoop)
+    {
+        Vertex nv = vertices[raw];
+        nv.position = glm::mix(vertices[raw].position, centroid, ratio);
+        nv.normal = normal;
+        innerLoop.push_back((unsigned int)vertices.size());
+        vertices.push_back(nv);
+    }
+
+    //원래 면을 걷어내고, 바깥-안쪽 사이 링 + 안쪽 루프의 부채꼴을 새로 넣는다
+    RemoveTriangles(activeFaceTris);
+    AppendBridgeRing(outerLoop, innerLoop);
+
+    const size_t fanStart = indices.size();
+    AppendFan(innerLoop, normal);
+
+    //새로 만든 안쪽 면을 선택 상태로 유지 — 바로 이어서 돌출하기 좋도록
+    activeFaceTris.clear();
+    for (size_t i = fanStart; i < indices.size(); i += 3)
+        activeFaceTris.push_back((unsigned int)i);
+
+    CommitTopologyChange(history, "인셋", std::move(beforeVerts), std::move(beforeIdx));
+    UploadFaceHighlight();
 }

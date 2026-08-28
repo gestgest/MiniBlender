@@ -86,6 +86,9 @@ private:
     bool showCylinderSegmentsPopup = false;
     int cylinderSegments = 32;
 
+    //인셋 비율. 슬라이더 값을 프레임 사이에도 들고 있어야 "적용" 버튼을 눌렀을 때 쓸 수 있다.
+    float insetRatio = 0.15f;
+
     //성능 그래프용 링버퍼. 숫자 하나만 보면 튀는 프레임(스파이크)을 놓친다.
     static const int HISTORY = 120;
     float cpuHistory[HISTORY] = {};

@@ -12,6 +12,14 @@ class Scene;
 class OrbitCamera;
 class History;
 
+//편집 모드의 선택 단위. 정점을 잡아 옮기던 지금까지와 달리, 면은 잡아 옮기지 않고
+//인셋/돌출 같은 "연산"의 대상이 된다 — 그래서 드래그 상태 없이 클릭 한 번으로 확정된다.
+enum class EditSelectMode
+{
+    Vertex,
+    Face
+};
+
 //정점 편집 모드 (블렌더의 Edit Mode에 해당).
 //
 //핵심 문제 — 왜 "용접(weld)"이 필요한가:
@@ -150,8 +158,56 @@ public:
     //안 그러면 화면의 점과 실제 메시가 어긋난 채로 다음 편집이 엉뚱한 값 위에 얹힌다.
     void RefreshIfEditing(Scene& scene, const Mesh* changedMesh);
 
+    //--- 면 선택 / 인셋 / 돌출 ---
+    EditSelectMode GetSelectMode() const { return selectMode; }
+    //모드를 바꾸면 반대쪽 선택은 비운다 (정점 점과 면 하이라이트가 동시에 남아있으면 헷갈린다)
+    void SetSelectMode(EditSelectMode mode);
+
+    bool HasActiveFace() const { return !activeFaceTris.empty(); }
+    //선택된 면의 변 수 (UI에 "N각형"으로 보여주는 용도). 경계 루프 길이와 같다.
+    int GetActiveFaceSides() const;
+
+    //화면 좌표에서 로컬 광선을 쏴 맞은 삼각형을 찾고, 그 삼각형과 "평면(법선) 일치 + 변 공유"로
+    //이어진 삼각형들을 BFS로 모아 하나의 면으로 삼는다. 못 맞히면 선택을 비우고 false.
+    bool PickFaceAt(float mouseX, float mouseY, int screenW, int screenH,
+        const glm::mat4& viewProj, const glm::mat4& model);
+    void ClearFaceSelection();
+
+    //선택된 면의 정점을 전부 복제해 제자리(간격 0)에 띄우고, 원래 경계와 새 경계 사이에
+    //옆면을 잇는다. 그러고 나서 정점 선택 모드로 바꿔 새로 뜬 정점들을 전부 선택한다 —
+    //그러면 이미 있는 이동 기즈모가 바로 그 자리에 뜨고, 사용자는 그걸 끌어올리기만 하면 된다.
+    void ExtrudeActiveFace(History& history);
+    //선택된 면의 경계를 무게중심 쪽으로 ratio(0~1)만큼 당겨 안쪽에 새 면을 만든다.
+    //새로 생긴 안쪽 면이 이어서 선택 상태로 남는다 (바로 돌출하기 좋도록).
+    void InsetActiveFace(float ratio, History& history);
+
+    //면 하이라이트 렌더용 (선택된 삼각형들의 로컬 좌표만 담은 버퍼)
+    unsigned int GetFaceVAO() const { return faceVAO; }
+    int GetFaceVertexCount() const { return (int)faceHighlightCount; }
+
 private:
     void ApplyPositionChange();   //선택된 용접 그룹 전체에 반영 + 노멀 갱신 + GPU 업로드
+
+    //Enter()에서 GPU를 다시 읽은 뒤, 혹은 위상을 바꾼 뒤(정점 개수가 달라진 뒤) 공통으로 쓰는
+    //용접 그룹 재계산. GPU 재읽기가 필요 없는 경우(돌출/인셋 직후)를 위해 Enter()에서 뽑아냈다.
+    void RebuildWeldGroups();
+
+    //--- 면 위상 조작에 쓰는 헬퍼들 ---
+    //면(삼각형 시작 인덱스 목록)의 경계를 이루는 정점을 순서대로(면 법선 기준 반시계) 뽑는다.
+    //변 상쇄 트릭: 면에 속한 삼각형들의 방향 있는 변 중, 반대 방향 짝이 없는 것만 경계다.
+    std::vector<unsigned int> ComputeBoundaryLoop(const std::vector<unsigned int>& faceTriBases) const;
+    glm::vec3 ComputeFaceNormal(const std::vector<unsigned int>& faceTriBases) const;
+    //두 루프(개수가 같아야 한다) 사이에 옆면을 잇는다. outerLoop[i] -> innerLoop[i] -> outerLoop[i+1] /
+    //innerLoop[i] -> innerLoop[i+1] -> outerLoop[i+1] — MakeCylinder 옆면과 같은 감김 순서.
+    void AppendBridgeRing(const std::vector<unsigned int>& outerLoop, const std::vector<unsigned int>& innerLoop);
+    //루프 하나를 loop[0]을 꼭짓점으로 삼아 부채꼴로 삼각분할해 덧붙인다 (볼록한 면에서만 유효).
+    void AppendFan(const std::vector<unsigned int>& loop, const glm::vec3& normal);
+    //주어진 삼각형들을 인덱스 배열에서 지운다 (인셋이 원래 면을 걷어낼 때 쓴다).
+    void RemoveTriangles(const std::vector<unsigned int>& triBases);
+    //위상이 바뀐 vertices/indices를 메시에 올리고, 되돌리기 액션을 쌓고, 용접 그룹을 다시 만든다.
+    void CommitTopologyChange(History& history, const std::string& label,
+        std::vector<Vertex>&& beforeVerts, std::vector<unsigned int>&& beforeIdx);
+    void UploadFaceHighlight();
 
     //카메라에서 해당 정점까지 가는 길을 이 메시의 삼각형이 막고 있는가 (전부 로컬 공간).
     //깊이 버퍼를 되읽는 대신 CPU에서 계산하는 이유: 피킹은 렌더링 "전"에 일어나서
@@ -186,6 +242,11 @@ private:
 
     bool xray = false;
 
+    EditSelectMode selectMode = EditSelectMode::Vertex;
+    //선택된 면 = 그 면을 이루는 삼각형들의 시작 인덱스(3의 배수) 목록.
+    //면 그룹 자체를 캐시해두지 않는 이유는 EditMode.cpp의 PickFaceAt 주석 참고.
+    std::vector<unsigned int> activeFaceTris;
+
     //이동 기즈모 상태
     GizmoAxis activeGizmoAxis = GizmoAxis::None;   //마우스를 누르고 끄는 중인 축
     GizmoAxis hoverGizmoAxis = GizmoAxis::None;    //누르지 않고 올려만 둔 축 (강조 표시용)
@@ -210,6 +271,12 @@ private:
     //선택된 정점만 모아 담는 버퍼. 선택이 바뀌거나 정점이 움직일 때마다 다시 올린다.
     unsigned int selectedVAO = 0;
     unsigned int selectedVBO = 0;
+
+    //선택된 면의 삼각형만 담는 버퍼 (하이라이트 렌더용). pointVAO와 같은 vec3-only 레이아웃이라
+    //MakePointVAO를 그대로 재사용한다 — GL_TRIANGLES로 그리느냐 GL_POINTS로 그리느냐는 그리는 쪽 몫.
+    unsigned int faceVAO = 0;
+    unsigned int faceVBO = 0;
+    size_t faceHighlightCount = 0;   //faceVBO에 올라간 정점 수 (삼각형 수 x 3)
 
     void UploadSelectedPoints();
     void UploadPoints();
